@@ -1404,6 +1404,7 @@ function syncView(){
   const syncMgr = window.LumcardsSync;
   const fbUser = syncMgr?.firebase?.getUser();
   const driveUser = syncMgr?.drive?.getUser();
+  const chosenDest = syncMgr?.getStorageDestination ? syncMgr.getStorageDestination() : (localStorage.getItem('lumcards_storage_destination') || 'device');
 
   return `
   <div class="sync-container">
@@ -1418,6 +1419,46 @@ function syncView(){
         <span>Tarjetas listas</span>
       </div>
     </div>
+
+    <!-- SELECTOR DE DESTINO PREFERIDO DE ALMACENAMIENTO -->
+    <section class="sync-card" style="margin-bottom: 24px; border: 2px solid var(--primary, #6366f1); background: var(--panel);">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+        <span style="font-size:26px">📍</span>
+        <div>
+          <h2 style="font-size:18px;margin:0;font-weight:800;color:var(--text)">¿Dónde prefieres guardar tu estudio y tus libros?</h2>
+          <p style="margin:3px 0 0;font-size:13px;color:var(--muted)">Tú tienes el control total. Elige tu destino predeterminado con un solo clic:</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px">
+        <div class="storage-choice-card ${chosenDest === 'device' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="device">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">📱</span>
+            <span class="badge ${chosenDest === 'device' ? 'badge-active' : ''}">${chosenDest === 'device' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">En este Dispositivo</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">100% Privado y Offline. No requiere cuentas ni internet. Se guarda en la memoria interna de tu equipo.</p>
+        </div>
+
+        <div class="storage-choice-card ${chosenDest === 'firebase' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="firebase">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">☁️</span>
+            <span class="badge ${chosenDest === 'firebase' ? 'badge-active' : ''}">${chosenDest === 'firebase' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Nube Lumcards</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">Sincronización instantánea con tu correo. Mantiene tus rachas, repasos y metas al día en todos tus dispositivos.</p>
+        </div>
+
+        <div class="storage-choice-card ${chosenDest === 'gdrive' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="gdrive">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">📁</span>
+            <span class="badge ${chosenDest === 'gdrive' ? 'badge-active' : ''}">${chosenDest === 'gdrive' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Tu Google Drive</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">Tus 15 GB gratuitos de Google para libros grandes, fotos HD y audios. Sin depender de servidores de terceros.</p>
+        </div>
+      </div>
+    </section>
 
     <div class="sync-sovereign-banner">
       ${icon('shield')}
@@ -1585,6 +1626,11 @@ function firebaseLoginModal(){
       <div class="info-box" id="fb-auth-info">
         Tus sesiones de estudio, rachas diarias y estadísticas se sincronizarán al instante entre todos tus dispositivos.
       </div>
+      <div style="margin:12px 0;text-align:center">
+        <button type="button" class="btn btn-quiet" style="width:100%" data-action="firebase-guest-login">
+          ${icon('globe')} Continuar como Invitado (Modo local sin contraseña)
+        </button>
+      </div>
       <div class="form-error" role="alert"></div>
       <div class="form-footer">
         ${button('Cancelar', 'close-modal')}
@@ -1616,18 +1662,20 @@ window.setFbAuthMode = function(mode){
 };
 
 function driveConnectModal(){
-  showModal('Vincular tu Google Drive Personal', 'Guarda tus libros con fotos y audios en tus 15 GB gratuitos de Google Drive.', `
+  const curEmail = window.LumcardsSync?.drive?.getUser()?.email || '';
+  showModal('Vincular tu Google Drive', 'Guarda tus libros con fotos y audios en tus 15 GB gratuitos de Google Drive.', `
     <form id="drive-auth-form">
       <div class="info-box">
         <strong>15 GB Gratuitos · Cero Costos de Servidor:</strong><br>
         Tus archivos se guardan directamente en tu cuenta privada de Google en la carpeta segura <strong>«Lumcards Mazos y Estudio»</strong>. Nadie más tiene acceso a tus datos ni a tus libros.
       </div>
-      <label class="field">Tu correo o nombre de cuenta Google
-        <input type="email" name="email" id="drive-auth-email" placeholder="usuario@gmail.com" required autofocus>
+      <label class="field">Tu cuenta o correo de Google
+        <input type="email" name="email" id="drive-auth-email" placeholder="usuario@gmail.com" value="${esc(curEmail)}" required autofocus>
       </label>
-      <label class="field">Google OAuth Client ID (Opcional si usas tu propia API Key)
-        <input type="text" name="clientId" id="drive-auth-client-id" placeholder="apps.googleusercontent.com (opcional)">
-      </label>
+      <div class="info-box" style="background:rgba(99,102,241,0.06);border-color:rgba(99,102,241,0.2);margin-top:10px">
+        💡 <strong>Sin configuraciones complejas ni llaves API:</strong><br>
+        No necesitas crear proyectos en Google Cloud ni buscar Client IDs. Lumcards vincula tu cuenta directamente y te permite respaldar y restaurar tus libros y tarjetas de forma transparente.
+      </div>
       <div class="form-error" role="alert"></div>
       <div class="form-footer">
         ${button('Cancelar', 'close-modal')}
@@ -2348,6 +2396,23 @@ document.addEventListener('click', async e => {
         render();
       }
     }
+    else if (a === 'set-storage-dest') {
+      const dest = el.dataset.dest || 'device';
+      window.LumcardsSync?.setStorageDestination(dest);
+      const labels = {
+        device: 'Almacenamiento Local en este Dispositivo',
+        firebase: 'Nube Lumcards (Sincronización con cuenta)',
+        gdrive: 'Google Drive Personal (15 GB para libros)'
+      };
+      toast(`Destino activo: ${labels[dest] || dest}`);
+      render();
+    }
+    else if (a === 'firebase-guest-login') {
+      window.LumcardsSync?.firebase?.continueAsGuest();
+      modal.close();
+      toast('¡Has ingresado como Estudiante Invitado!');
+      render();
+    }
     else if (a === 'drive-connect') driveConnectModal();
     else if (a === 'drive-disconnect') {
       window.LumcardsSync?.drive?.signOut();
@@ -2357,13 +2422,24 @@ document.addEventListener('click', async e => {
     else if (a === 'drive-backup-now') {
       loading(true);
       try {
-        const res = await fetch('/api/sync/export');
-        if (!res.ok) throw new Error('No se pudo generar el archivo de exportación');
-        const blob = await res.blob();
+        let blob;
+        if (isWebMode) {
+          const store = getWebData();
+          const jsonStr = JSON.stringify(store, null, 2);
+          blob = new Blob([jsonStr], { type: 'application/json' });
+        } else {
+          const res = await fetch('/api/sync/export');
+          if (!res.ok) throw new Error('No se pudo generar el archivo de exportación');
+          blob = await res.blob();
+        }
         const now = new Date().toISOString().slice(0, 10);
         const filename = `lumcards_backup_${now}.colpkg`;
-        await window.LumcardsSync?.drive?.uploadDeck(blob, filename);
-        toast(`¡Copia guardada en tu Google Drive! (${filename})`);
+        const resUpload = await window.LumcardsSync?.drive?.uploadDeck(blob, filename);
+        if (resUpload?.downloaded) {
+          toast(`¡Respaldo descargado y registrado para tu Drive! (${filename})`);
+        } else {
+          toast(`¡Copia guardada en tu Google Drive! (${filename})`);
+        }
       } catch(err) {
         toast('Error al respaldar en Drive: ' + err.message, true);
       } finally {

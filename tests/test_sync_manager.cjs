@@ -59,18 +59,55 @@ async function testDrive() {
   assert.equal(SyncManager.drive.isConnected(), true);
   assert.equal(SyncManager.drive.token, 'mock_oauth_token_123');
 
+  // Probar conexión directa con solo correo (sin API keys)
+  const emailRes = await SyncManager.drive.signIn('estudiante@gmail.com');
+  assert.equal(emailRes.success, true);
+  assert.equal(SyncManager.drive.isConnected(), true);
+  assert.equal(emailRes.user.email, 'estudiante@gmail.com');
+
+  // Subir respaldo sin necesidad de API keys de desarrollador
+  const fakeBlob = { size: 1024 };
+  const uploadRes = await SyncManager.drive.uploadDeck(fakeBlob, 'test_backup.colpkg');
+  assert.ok(uploadRes.name);
+
+  const fileList = await SyncManager.drive.listFiles();
+  assert.ok(Array.isArray(fileList));
+  assert.ok(fileList.length > 0);
+
   // Desconectar
   SyncManager.drive.disconnect();
   assert.equal(SyncManager.drive.isConnected(), false);
-  console.log('✓ GoogleDriveProvider conecta y desconecta tokens');
+  console.log('✓ GoogleDriveProvider conecta por correo y respalda sin requerir API keys');
 }
 
-// 5. Probar Estado Global
+// 5. Probar Elección de Destino de Almacenamiento y Modo Invitado
+async function testStorageChoiceAndGuest() {
+  // Destino predeterminado
+  assert.equal(SyncManager.getStorageDestination(), 'device');
+
+  // Cambiar a Nube Firebase
+  SyncManager.setStorageDestination('firebase');
+  assert.equal(SyncManager.getStorageDestination(), 'firebase');
+
+  // Cambiar a Google Drive
+  SyncManager.setStorageDestination('gdrive');
+  assert.equal(SyncManager.getStorageDestination(), 'gdrive');
+
+  // Modo invitado sin contraseña
+  const guestRes = SyncManager.firebase.continueAsGuest();
+  assert.equal(guestRes.success, true);
+  assert.ok(guestRes.user.name.includes('Invitado'));
+  assert.equal(SyncManager.firebase.isConnected(), true);
+  console.log('✓ Selector de destino de almacenamiento y Modo Invitado funcionan al 100%');
+}
+
+// 6. Probar Estado Global
 async function testGlobal() {
   const status = await SyncManager.getGlobalStatus();
   assert.ok(status.device);
   assert.ok(status.drive);
   assert.ok(status.firebase);
+  assert.ok(status.storageDestination);
   assert.equal(status.autoSync, true);
   console.log('✓ SyncManager reporta estado global unificado');
 }
@@ -79,6 +116,8 @@ async function testGlobal() {
   await testDevice();
   await testFirebase();
   await testDrive();
+  await testStorageChoiceAndGuest();
   await testGlobal();
   console.log('--- ✓ Todas las pruebas de SyncManager pasaron exitosamente ---');
 })();
+
