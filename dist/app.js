@@ -2678,11 +2678,19 @@ else if(form.id==='firebase-auth-form'){
   const isRegister = values.authMode === 'register';
   const name = values.displayName?.trim() || email.split('@')[0];
   if (isRegister) {
-    await window.LumcardsSync?.firebase?.register(email, pass, name);
-    toast('¡Cuenta de Firebase creada con éxito!');
+    const res = await window.LumcardsSync?.firebase?.register(email, pass, name);
+    if (res?.notice === 'offline_auth_fallback') {
+      toast('Sesión iniciada en modo local. Recuerda activar Correo/Contraseña en la consola de Firebase.');
+    } else {
+      toast('¡Cuenta de Firebase creada con éxito!');
+    }
   } else {
-    await window.LumcardsSync?.firebase?.signIn(email, pass);
-    toast('¡Sesión iniciada en Firebase!');
+    const res = await window.LumcardsSync?.firebase?.signIn(email, pass);
+    if (res?.notice === 'offline_auth_fallback') {
+      toast('Sesión iniciada en modo local. Recuerda activar Correo/Contraseña en la consola de Firebase.');
+    } else {
+      toast('¡Sesión iniciada en Firebase!');
+    }
   }
   modal.close();
   render();

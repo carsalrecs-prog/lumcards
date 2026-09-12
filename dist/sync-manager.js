@@ -343,13 +343,25 @@
 
     // Inicio de sesión con correo / Google / Anónimo
     async login(email, password) {
-      // Simulación o llamada al SDK de Firebase si está presente
       if (typeof window !== 'undefined' && window.firebase?.auth) {
-        const auth = window.firebase.auth();
-        const userCred = await auth.signInWithEmailAndPassword(email, password);
-        this.user = { uid: userCred.user.uid, email: userCred.user.email, name: userCred.user.displayName || email.split('@')[0] };
-        localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
-        return { success: true, user: this.user };
+        try {
+          const auth = window.firebase.auth();
+          const userCred = await auth.signInWithEmailAndPassword(email, password);
+          this.user = { uid: userCred.user.uid, email: userCred.user.email, name: userCred.user.displayName || email.split('@')[0] };
+          localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+          return { success: true, user: this.user };
+        } catch (err) {
+          if (err.code === 'auth/configuration-not-found') {
+            console.warn('Firebase Auth sin activar en consola. Entrando en modo sesión local.');
+            this.user = { uid: 'usr_' + Date.now(), email, name: email.split('@')[0], isLocalSession: true };
+            localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+            return { success: true, user: this.user, notice: 'offline_auth_fallback' };
+          }
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+            throw new Error('Credenciales no encontradas. Si aún no tienes cuenta, pulsa en «Crear Cuenta».');
+          }
+          throw err;
+        }
       }
 
       // Autenticación ligera local-friendly
@@ -367,12 +379,24 @@
 
     async register(email, password, name) {
       if (typeof window !== 'undefined' && window.firebase?.auth) {
-        const auth = window.firebase.auth();
-        const userCred = await auth.createUserWithEmailAndPassword(email, password);
-        if (name && userCred.user.updateProfile) await userCred.user.updateProfile({ displayName: name });
-        this.user = { uid: userCred.user.uid, email: userCred.user.email, name: name || email.split('@')[0] };
-        localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
-        return { success: true, user: this.user };
+        try {
+          const auth = window.firebase.auth();
+          const userCred = await auth.createUserWithEmailAndPassword(email, password);
+          if (name && userCred.user.updateProfile) await userCred.user.updateProfile({ displayName: name });
+          this.user = { uid: userCred.user.uid, email: userCred.user.email, name: name || email.split('@')[0] };
+          localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+          return { success: true, user: this.user };
+        } catch (err) {
+          if (err.code === 'auth/configuration-not-found') {
+            this.user = { uid: 'usr_' + Date.now(), email, name: name || email.split('@')[0], isLocalSession: true };
+            localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+            return { success: true, user: this.user, notice: 'offline_auth_fallback' };
+          }
+          if (err.code === 'auth/email-already-in-use') {
+            throw new Error('Este correo ya está registrado. Pulsa arriba en «Iniciar Sesión» para acceder.');
+          }
+          throw err;
+        }
       }
 
       this.user = { uid: 'usr_' + Date.now(), email, name: name || email.split('@')[0] };
