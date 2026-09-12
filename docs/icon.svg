@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="lumGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#3730a3"/>
+    </linearGradient>
+  </defs>
+  <rect width="60" height="60" x="2" y="2" rx="15" fill="url(#lumGrad)" stroke="rgba(255,255,255,0.25)" stroke-width="1.5"/>
+  <text x="15" y="46" fill="#ffffff" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="38" font-weight="800">L</text>
+  <!-- 4-point star / sparkle -->
+  <path d="M47 9 L48.8 14.2 L54 16 L48.8 17.8 L47 23 L45.2 17.8 L40 16 L45.2 14.2 Z" fill="#ffffff"/>
+</svg>

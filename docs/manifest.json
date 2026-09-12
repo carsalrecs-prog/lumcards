@@ -1,0 +1,16 @@
+{
+  "name": "Lumcards",
+  "short_name": "Lumcards",
+  "description": "Tu espacio personal de estudio, práctica y tarjetas de memoria.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
