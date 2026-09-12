@@ -1,0 +1,23 @@
+{
+  "appId": "app.lumcards.study",
+  "appName": "Lumcards",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true,
+    "backgroundColor": "#1e1b4b"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#1e1b4b",
+      "showSpinner": false
+    }
+  }
+}

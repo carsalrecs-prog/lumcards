@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="description" content="Tu espacio personal de estudio. Tarjetas de memoria, repasos espaciados y progreso guardados en tu PC.">
+  <title>Lumcards · Tu espacio de aprendizaje</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="/app.css?v=20260912">
+  <script defer src="/vendor/katex/katex.min.js"></script>
+  <script defer src="/vendor/katex/contrib/auto-render.min.js"></script>
+  <script defer src="https://accounts.google.com/gsi/client"></script>
+  <script defer src="/sync-manager.js"></script>
+  <script defer src="/app.js?v=20260912"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Saltar al contenido</a>
+  <div id="app"><main class="initial"><div class="brand-mark">L<span>✦</span></div><h1>Lumcards</h1><p>Abriendo tu biblioteca…</p></main></div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept=".apkg,.colpkg,.anki2" hidden>
+  <input type="file" id="attach-file" accept=".png,.jpg,.jpeg,.webp,.gif,.mp3,.wav,.ogg,.m4a" hidden>
+</body>
+</html>
