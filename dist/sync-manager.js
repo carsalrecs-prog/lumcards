@@ -306,6 +306,9 @@
 
         if (typeof window !== 'undefined' && window.firebase && !window.firebase.apps?.length) {
           window.firebase.initializeApp(this.getConfig());
+          if (window.firebase.analytics) {
+            try { window.firebase.analytics(); } catch (_) {}
+          }
         }
       } catch (_) {}
     },
@@ -318,13 +321,13 @@
     getConfig() {
       this.init();
       return this.config || {
-        projectId: "lumcards",
-        appId: "1:702374747374:web:9bc56c595e5b2bf511a7ff",
-        storageBucket: "lumcards.firebasestorage.app",
         apiKey: "AIzaSyBw6a1fhczXknvFTYhVoPh8-gkOmxlWXA0",
         authDomain: "lumcards.firebaseapp.com",
+        projectId: "lumcards",
+        storageBucket: "lumcards.firebasestorage.app",
         messagingSenderId: "702374747374",
-        measurementId: "G-S6BLY1XT49"
+        appId: "1:702374747374:web:4b4e19167b05a10411a7ff",
+        measurementId: "G-3GRLS9EHY9"
       };
     },
 
