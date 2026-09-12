@@ -1,5 +1,4 @@
-requirements.txt
-requirements-lock.txt
+requirements*.txt
 *.py
 *.cmd
 *.ps1

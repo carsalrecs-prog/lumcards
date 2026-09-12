@@ -4,6 +4,7 @@
   "description": "Tu espacio personal de estudio. Tarjetas de memoria, repasos espaciados y suite de juegos estilo Quizlet Plus.",
   "main": "dist/app.js",
   "scripts": {
+    "build": "echo 'Lumcards static build ready in dist/'",
     "test": "node tests/test_quizlet_games.cjs && node tests/test_sync_manager.cjs",
     "deploy:firebase": "firebase deploy",
     "deploy:hosting": "firebase deploy --only hosting",

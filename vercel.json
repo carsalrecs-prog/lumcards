@@ -1,6 +1,8 @@
 {
   "version": 2,
+  "buildCommand": "echo 'Build OK'",
   "outputDirectory": "dist",
+  "framework": null,
   "cleanUrls": true,
   "routes": [
     { "src": "/practice", "dest": "/practice.html" },
