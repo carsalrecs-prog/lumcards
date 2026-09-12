@@ -1,1 +1,9 @@
-{"version": 2, "cleanUrls": true, "routes": [{"src": "/practice", "dest": "/practice.html"}, {"src": "/(.*)", "dest": "/$1"}]}
+{
+  "version": 2,
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "routes": [
+    { "src": "/practice", "dest": "/practice.html" },
+    { "src": "/(.*)", "dest": "/$1" }
+  ]
+}
