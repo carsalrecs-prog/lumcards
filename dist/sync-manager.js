@@ -303,6 +303,10 @@
         if (conf) this.config = JSON.parse(conf);
         const usr = localStorage.getItem(STORAGE_KEYS.FIREBASE_USER);
         if (usr) this.user = JSON.parse(usr);
+
+        if (typeof window !== 'undefined' && window.firebase && !window.firebase.apps?.length) {
+          window.firebase.initializeApp(this.getConfig());
+        }
       } catch (_) {}
     },
 
@@ -314,10 +318,13 @@
     getConfig() {
       this.init();
       return this.config || {
-        apiKey: "AIzaSy_LUMCARDS_DEFAULT_CONFIG",
-        authDomain: "lumcards-app.firebaseapp.com",
-        projectId: "lumcards-app",
-        storageBucket: "lumcards-app.appspot.com"
+        projectId: "lumcards",
+        appId: "1:702374747374:web:9bc56c595e5b2bf511a7ff",
+        storageBucket: "lumcards.firebasestorage.app",
+        apiKey: "AIzaSyBw6a1fhczXknvFTYhVoPh8-gkOmxlWXA0",
+        authDomain: "lumcards.firebaseapp.com",
+        messagingSenderId: "702374747374",
+        measurementId: "G-S6BLY1XT49"
       };
     },
 
