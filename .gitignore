@@ -8,4 +8,4 @@ __pycache__/
 *.zip
 *.colpkg
 *.apkg
-
+node_modules/
