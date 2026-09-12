@@ -193,8 +193,42 @@ function getWebData() {
   return initial;
 }
 
+let cloudSyncDebounce = null;
 function saveWebData(store) {
   try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(store)); } catch(_) {}
+  if (window.LumcardsSync?.firebase?.isConnected()) {
+    clearTimeout(cloudSyncDebounce);
+    cloudSyncDebounce = setTimeout(async () => {
+      try {
+        await window.LumcardsSync.firebase.syncFullWorkspace(store);
+      } catch (e) {
+        console.warn('Auto cloud sync warning:', e);
+      }
+    }, 1200);
+  }
+}
+
+async function syncFromCloudIfAvailable() {
+  if (window.LumcardsSync?.firebase?.isConnected()) {
+    try {
+      const cloudData = await window.LumcardsSync.firebase.pullFullWorkspace();
+      const localStore = getWebData();
+      if (cloudData && cloudData.decks && cloudData.decks.length > 0) {
+        localStore.decks = cloudData.decks;
+        localStore.cards = cloudData.cards || [];
+        if (cloudData.stats) localStore.stats = cloudData.stats;
+        if (cloudData.settings) localStore.settings = cloudData.settings;
+        try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(localStore)); } catch(_) {}
+        return true;
+      } else if (localStore && localStore.decks && localStore.decks.length > 0) {
+        // Primera sincronización: respaldar los mazos locales existentes en la nube
+        await window.LumcardsSync.firebase.syncFullWorkspace(localStore);
+      }
+    } catch (e) {
+      console.warn('Sync on login error:', e);
+    }
+  }
+  return false;
 }
 
 function webApi(path, body, method) {
@@ -448,7 +482,12 @@ function deckPalette(d,i){const n=d.name.toLowerCase();if(n.includes('ingl'))ret
 function getDue(d){return Number(d.due||0);}
 function getStats(){const s=data.stats;return {...s,totalCards:s.totalCards??data.cards.length,dueToday:s.dueToday??data.decks.reduce((n,d)=>n+getDue(d),0),reviewedToday:s.reviewedToday||0,streak:s.streak||0};}
 function shell(content){const names={decks:'Mis mazos',stats:'Estadísticas',favorites:'Favoritos',sync:'Sincronización',backups:'Copias de seguridad',settings:'Ajustes',cards:'Explorar tarjetas',study:'Repaso'}; const nav=(id,name,ic,extra='')=>`<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}">${icon(ic)}${name}${extra}</button>`;
-return `<div class="app-layout"><aside class="sidebar" aria-label="Navegación principal"><div class="brand"><div class="brand-mark">L<span>✦</span></div><div><div class="brand-name">Lumcards</div><div class="brand-caption">Tu espacio de estudio</div></div></div><div class="nav-label">BIBLIOTECA</div><nav class="nav">${nav('decks','Mis mazos','layers',`<span class="badge">${data.decks.length}</span>`)}${nav('cards','Explorar tarjetas','search')}${nav('stats','Estadísticas','chart')}${nav('favorites','Favoritos','star')}<a class="nav-item" href="/practice.html" style="text-decoration:none">${icon('spark')}Jugar y aprender</a></nav><div class="nav-separator"></div><div class="nav-label">MI ESPACIO</div><nav class="nav">${nav('sync','Sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}</nav><div class="sidebar-bottom"><div class="tip-box">${icon('bulb')}<strong>Un poco, todos los días.</strong><p>Una sesión corta hoy vale más que dejarlo todo para mañana.</p></div><div class="profile"><div class="avatar">R</div><div><strong>Mi espacio personal</strong><span>Guardado en este equipo</span></div>${icon('shield')}</div></div></aside><div class="workspace"><header class="topbar"><button class="icon-button mobile-toggle" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><div class="breadcrumb">Mi espacio <span>/</span><strong>${names[view]||'Sincronización'}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="global-search" type="search" placeholder="Buscar en tu biblioteca…" aria-label="Buscar en tu biblioteca" value="${esc(search)}"><kbd>Ctrl K</kbd></label><button class="icon-button" data-action="nav" data-view="sync" title="Sincronización móvil y P2P" aria-label="Sincronización">${icon('cloud')}</button><button class="icon-button" data-action="theme" aria-label="${theme==='dark'?'Activar tema claro':'Activar tema oscuro'}">${icon(theme==='dark'?'sun':'moon')}</button><button class="icon-button" data-action="help" aria-label="Ayuda y atajos">${icon('help')}</button></div></header><main class="main" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('cloud')}Guardado automáticamente en tu PC</span><span>Hecho para aprender a tu ritmo. <span style="color:var(--orange)">✦</span></span></footer></main></div></div>`;}
+const fbUser = window.LumcardsSync?.firebase?.getUser();
+const userInitial = fbUser ? esc((fbUser.name || fbUser.email || 'G')[0].toUpperCase()) : 'L';
+const avatarHtml = fbUser?.photoURL ? `<img src="${esc(fbUser.photoURL)}" class="avatar" style="width:32px;height:32px;border-radius:50%;object-fit:cover" alt="Google Avatar">` : `<div class="avatar">${userInitial}</div>`;
+const userTitle = fbUser ? esc(fbUser.name || fbUser.email.split('@')[0]) : 'Mi espacio personal';
+const userSubtitle = fbUser ? (fbUser.isLocalSession ? 'Modo local' : '● Sincronizado en Google') : 'Guardado en este equipo';
+return `<div class="app-layout"><aside class="sidebar" aria-label="Navegación principal"><div class="brand"><div class="brand-mark">L<span>✦</span></div><div><div class="brand-name">Lumcards</div><div class="brand-caption">Tu espacio de estudio</div></div></div><div class="nav-label">BIBLIOTECA</div><nav class="nav">${nav('decks','Mis mazos','layers',`<span class="badge">${data.decks.length}</span>`)}${nav('cards','Explorar tarjetas','search')}${nav('stats','Estadísticas','chart')}${nav('favorites','Favoritos','star')}<a class="nav-item" href="/practice.html" style="text-decoration:none">${icon('spark')}Jugar y aprender</a></nav><div class="nav-separator"></div><div class="nav-label">MI ESPACIO</div><nav class="nav">${nav('sync','Sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}</nav><div class="sidebar-bottom"><div class="tip-box">${icon('bulb')}<strong>Un poco, todos los días.</strong><p>Una sesión corta hoy vale más que dejarlo todo para mañana.</p></div><div class="profile" data-action="nav" data-view="sync" style="cursor:pointer" title="Configurar cuenta y sincronización en la nube">${avatarHtml}<div style="overflow:hidden"><strong style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${userTitle}</strong><span style="${fbUser && !fbUser.isLocalSession ? 'color:#10b981;font-weight:600' : ''}">${userSubtitle}</span></div>${icon(fbUser ? 'cloud' : 'shield')}</div></div></aside><div class="workspace"><header class="topbar"><button class="icon-button mobile-toggle" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><div class="breadcrumb">Mi espacio <span>/</span><strong>${names[view]||'Sincronización'}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="global-search" type="search" placeholder="Buscar en tu biblioteca…" aria-label="Buscar en tu biblioteca" value="${esc(search)}"><kbd>Ctrl K</kbd></label><button class="icon-button" data-action="nav" data-view="sync" title="Sincronización móvil y P2P" aria-label="Sincronización">${icon('cloud')}</button><button class="icon-button" data-action="theme" aria-label="${theme==='dark'?'Activar tema claro':'Activar tema oscuro'}">${icon(theme==='dark'?'sun':'moon')}</button><button class="icon-button" data-action="help" aria-label="Ayuda y atajos">${icon('help')}</button></div></header><main class="main" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('cloud')}${fbUser && !fbUser.isLocalSession ? `Sincronizado con Google (${esc(fbUser.email)})` : 'Guardado automáticamente en tu PC'}</span><span>Hecho para aprender a tu ritmo. <span style="color:var(--orange)">✦</span></span></footer></main></div></div>`;}
 function statsStrip(){const s=getStats();return `<div class="stats-strip">${[['layers','Tarjetas en tu biblioteca',num(s.totalCards),''],['flame','Racha de estudio',num(s.streak),s.streak===1?'día':'días'],['check','Repasadas hoy',num(s.reviewedToday),''],['target','Retención',s.retention==null?'—':Math.round(s.retention)+'%','']].map(([ic,label,value,unit])=>`<div class="stat"><span class="stat-icon">${icon(ic)}</span><div><div class="stat-label">${label}</div><div class="stat-number">${value}<small>${unit}</small></div></div></div>`).join('')}</div>`;}
 function dashboard(){
   const s=getStats(), goal=data.settings.dailyGoal||20, pct=Math.min(100,Math.round(s.reviewedToday/goal*100));
@@ -1605,7 +1644,25 @@ function syncView(){
 }
 
 function firebaseLoginModal(){
-  showModal('Cuenta en la Nube · Firebase', 'Inicia sesión o regístrate para sincronizar tu progreso y rachas en tiempo real.', `
+  showModal('Cuenta en la Nube · Google y Firebase', 'Inicia sesión con tu cuenta de Google para sincronizar tus mazos, tarjetas y progreso en todos tus dispositivos.', `
+    <div style="margin-bottom:16px">
+      <button type="button" class="btn" id="fb-google-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 18px;font-weight:600;font-size:15px;border-radius:10px;border:1px solid #dadce0;background:#ffffff;color:#3c4043;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.1);transition:all 0.2s ease" data-action="firebase-google-login">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
+          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24Z"/>
+          <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15Z"/>
+          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
+        </svg>
+        <span>Continuar con mi cuenta de Google</span>
+      </button>
+    </div>
+
+    <div style="display:flex;align-items:center;text-align:center;margin:16px 0;color:var(--muted);font-size:13px">
+      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
+      <span style="padding:0 12px">o con correo y contraseña</span>
+      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
+    </div>
+
     <form id="firebase-auth-form">
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <button type="button" class="btn btn-primary" id="fb-mode-login-btn" style="flex:1" onclick="window.setFbAuthMode('login')">Iniciar Sesión</button>
@@ -2372,23 +2429,48 @@ document.addEventListener('click', async e => {
       if (url) window.open(url, '_blank');
     }
     else if (a === 'firebase-login-modal') firebaseLoginModal();
+    else if (a === 'firebase-google-login') {
+      loading(true);
+      try {
+        const res = await window.LumcardsSync?.firebase?.signInWithGoogle();
+        if (res && res.needsProviderEnable) {
+          showModal('Habilitar Proveedor Google en Firebase', 'Falta activar el botón de Google en tu consola de Firebase.', `
+            <div class="info-box" style="margin-bottom:14px">
+              <strong>Paso único para activar Google Sign-In:</strong><br>
+              En la consola de Firebase sólo debes activar el interruptor de <strong>Google</strong>.<br><br>
+              👉 <a href="${res.consoleUrl}" target="_blank" style="color:var(--primary);font-weight:700;text-decoration:underline">Abrir Consola de Firebase · Proveedores</a>
+            </div>
+            <div style="margin-top:16px;text-align:right">
+              ${button('Entendido, ya lo activo', 'close-modal', 'check', 'btn-primary')}
+            </div>
+          `);
+          return;
+        }
+        modal.close();
+        toast(`¡Bienvenido! Sesión iniciada con Google (${res.user.email})`);
+        await syncFromCloudIfAvailable();
+        await refresh();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        loading(false);
+      }
+    }
     else if (a === 'firebase-logout') {
-      window.LumcardsSync?.firebase?.signOut();
+      await window.LumcardsSync?.firebase?.signOut();
       render();
       toast('Sesión cerrada en Firebase.');
     }
     else if (a === 'firebase-sync-now') {
       loading(true);
       try {
-        const stats = {
-          totalCards: data.cards?.length || 0,
-          totalDecks: data.decks?.length || 0,
-          streak: data.streak || 0,
-          dailyGoal: data.settings?.dailyGoal || 20,
-          lastSync: new Date().toISOString()
-        };
-        await window.LumcardsSync?.firebase?.saveProgress(stats);
-        toast('¡Progreso y rachas sincronizados con Firebase con éxito!');
+        const store = getWebData();
+        const res = await window.LumcardsSync?.firebase?.syncFullWorkspace(store);
+        if (res && res.success) {
+          toast('¡Todo tu espacio de estudio, libros y tarjetas están sincronizados en la nube!');
+        } else {
+          toast(res?.error || 'Sincronización guardada localmente.', !res?.success);
+        }
       } catch(err) {
         toast(err.message, true);
       } finally {
@@ -2693,7 +2775,8 @@ else if(form.id==='firebase-auth-form'){
     }
   }
   modal.close();
-  render();
+  await syncFromCloudIfAvailable();
+  await refresh();
 }
 else if(form.id==='drive-auth-form'){
   const email = values.email?.trim();
@@ -2713,11 +2796,18 @@ window.addEventListener('message',e=>{AudioController.unlock();if(e.data){if(e.d
 modal.addEventListener('click',e=>{if(e.target===modal){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close();}});
 async function boot(){
   try{
+    if (window.LumcardsSync) {
+      window.LumcardsSync.init();
+      await syncFromCloudIfAvailable();
+    }
     await refresh();
   }catch(error){
     console.warn('Conmutando a Modo Web Cloud:', error);
     isWebMode = true;
     try {
+      if (window.LumcardsSync) {
+        await syncFromCloudIfAvailable();
+      }
       await refresh();
       toast('Modo Web Cloud activado · Tarjetas guardadas en este navegador');
     } catch(err2) {

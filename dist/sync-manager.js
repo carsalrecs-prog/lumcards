@@ -455,6 +455,108 @@
       return raw ? JSON.parse(raw) : null;
     },
 
+    // Inicio de sesión con Cuenta de Google oficial (Popup de Google)
+    async signInWithGoogle() {
+      if (typeof window !== 'undefined' && window.firebase?.auth) {
+        try {
+          const auth = window.firebase.auth();
+          const provider = new window.firebase.auth.GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          const userCred = await auth.signInWithPopup(provider);
+          this.user = {
+            uid: userCred.user.uid,
+            email: userCred.user.email,
+            name: userCred.user.displayName || userCred.user.email.split('@')[0],
+            photoURL: userCred.user.photoURL,
+            provider: 'google'
+          };
+          localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+          return { success: true, user: this.user };
+        } catch (err) {
+          console.warn('Firebase Google Auth error:', err);
+          if (err.code === 'auth/popup-closed-by-user') {
+            throw new Error('La ventana de Google se cerró antes de completar el inicio de sesión.');
+          }
+          if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+            return {
+              success: false,
+              needsProviderEnable: true,
+              error: 'Debes habilitar el proveedor "Google" en la consola de Firebase.',
+              consoleUrl: 'https://console.firebase.google.com/project/lumcards/authentication/providers'
+            };
+          }
+          throw err;
+        }
+      }
+      throw new Error('Servicio de Google Auth no disponible. Comprueba tu conexión a internet.');
+    },
+
+    // Sincronizar todos los mazos, tarjetas, estadísticas y configuraciones a Cloud Firestore
+    async syncFullWorkspace(workspaceData) {
+      this.init();
+      if (!this.user || !this.user.uid) return { success: false, reason: 'no_user' };
+      
+      const payload = {
+        userId: this.user.uid,
+        email: this.user.email || '',
+        name: this.user.name || '',
+        updatedAt: new Date().toISOString(),
+        decks: (workspaceData.decks || []).map(d => ({
+          id: d.id,
+          name: d.name,
+          total: d.total || 0,
+          new: d.new || 0,
+          learn: d.learn || 0,
+          due: d.due || 0,
+          parentName: d.parentName || null
+        })),
+        cards: (workspaceData.cards || []).slice(0, 5000),
+        stats: workspaceData.stats || {},
+        settings: workspaceData.settings || {}
+      };
+
+      if (typeof window !== 'undefined' && window.firebase?.firestore && !this.user.isLocalSession) {
+        try {
+          const db = window.firebase.firestore();
+          await db.collection('users').doc(this.user.uid).set(payload, { merge: true });
+          localStorage.setItem('lumcards_last_cloud_sync', payload.updatedAt);
+          return { success: true, syncedAt: payload.updatedAt, cloud: true };
+        } catch (err) {
+          console.warn('Firestore sync error:', err);
+          localStorage.setItem(`lumcards_cloud_backup_${this.user.uid}`, JSON.stringify(payload));
+          return { success: false, error: err.message, localFallback: true };
+        }
+      }
+
+      localStorage.setItem(`lumcards_cloud_backup_${this.user.uid}`, JSON.stringify(payload));
+      return { success: true, syncedAt: payload.updatedAt, localMock: true };
+    },
+
+    // Descargar mazo y tarjetas completos desde Cloud Firestore
+    async pullFullWorkspace() {
+      this.init();
+      if (!this.user || !this.user.uid) return null;
+
+      if (typeof window !== 'undefined' && window.firebase?.firestore && !this.user.isLocalSession) {
+        try {
+          const db = window.firebase.firestore();
+          const doc = await db.collection('users').doc(this.user.uid).get();
+          if (doc.exists) {
+            const data = doc.data();
+            if (data && data.decks && data.decks.length > 0) {
+              localStorage.setItem('lumcards_last_cloud_sync', data.updatedAt || new Date().toISOString());
+              return data;
+            }
+          }
+        } catch (err) {
+          console.warn('Error pulling workspace from Firestore:', err);
+        }
+      }
+
+      const raw = localStorage.getItem(`lumcards_cloud_backup_${this.user.uid}`);
+      return raw ? JSON.parse(raw) : null;
+    },
+
     continueAsGuest() {
       this.user = { uid: 'guest_' + Date.now(), email: 'invitado@lumcards.local', name: 'Estudiante Invitado' };
       localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
