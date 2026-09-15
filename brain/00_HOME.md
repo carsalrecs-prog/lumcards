@@ -7,15 +7,15 @@ updated: 2026-09-15
 # Cerebro de Lumcards
 
 > [!summary] Lectura rápida
-> Lumcards es una aplicación de tarjetas con escritorio Windows, web/PWA y Android. La experiencia, los juegos y varios importadores son propios, pero el backend de escritorio todavía usa el paquete oficial `anki==26.8.1` bajo AGPL. La futura licencia comercial sigue pendiente.
+> Lumcards es una aplicación de tarjetas con escritorio Windows, web/PWA y Android. El backend local usa el motor propio `clean_engine.py` sin importar el paquete oficial de Anki en tiempo de ejecución. La revisión jurídica externa y la preparación comercial siguen pendientes.
 
 ## Ahora
 
 **Entrada para cualquier agente:** [[08_HANDOFF|Relevo actual]]. Contiene el último resultado y el siguiente paso. Para aprender el sistema: [[09_GUIDE|Guía para Richard y los agentes]].
 
-1. Elegir la ruta comercial: **AGPL y servicios** o **motor propio con código privado**.
-2. Corregir las afirmaciones legales absolutas y reconciliar la documentación.
-3. Estabilizar una versión reproducible: resolver cambios sin confirmar, ejecutar toda la suite y crear un instalador limpio.
+1. Obtener revisión jurídica externa y corregir afirmaciones legales absolutas.
+2. Estabilizar una versión reproducible: resolver cambios sin confirmar, ejecutar toda la suite y crear un instalador limpio.
+3. Planificar el siguiente objetivo de producto para ejecución por Antigravity y revisión por Codex.
 
 ## Mapa mínimo
 
@@ -26,7 +26,8 @@ updated: 2026-09-15
 - [[05_ARCHITECTURE|Arquitectura]] — dónde vive cada componente.
 - [[06_LEGAL|Licencias y comercialización]] — riesgos y documentación fuente.
 - [[07_PROTOCOL|Protocolo compartido]] — checkpoints, interrupciones y trabajo entre agentes.
-- [[tasks/2026-09-15-0047-codex-regresiones-motor-carpetas-progreso|Última tarea documentada]] — carpetas, renombrado y estadísticas restaurados.
+- [[10_AGENT_CAPABILITIES|Capacidades de agentes]] — skills, MCP, límites y cuándo pedir herramientas nuevas.
+- [[tasks/2026-09-15-1307-antigravity-subir-github-desplegar-vercel|Última tarea documentada]] — subida a GitHub y despliegue en Vercel.
 
 ## Regla de uso
 

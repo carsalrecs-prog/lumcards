@@ -7,9 +7,9 @@ tags: [lumcards, tarea, agentes, capacidades]
 ## Control
 
 - ID: 2026-09-15-1306-codex-capacidades-agentes.
-- Estado: en_curso.
+- Estado: hecha.
 - Responsable y sesión: Codex, conversación local actual.
-- Actualizado: 2026-09-15T13:06:45-05:00.
+- Actualizado: 2026-09-15T13:10:58-05:00.
 - Entorno: `D:\CODEX`, rama `main`, commit base `f5a8627`; worktree con cambios locales previos que no se modificarán salvo las notas de memoria indicadas aquí.
 
 ## Objetivo y aceptación
@@ -26,16 +26,19 @@ tags: [lumcards, tarea, agentes, capacidades]
 
 ## Checkpoint
 
-- 13:06 - Leídos portada, relevo, protocolo, guía y plantilla; comprobado `git status --short`. Identificadas 74 skills en el texto aportado y nueve servidores MCP visibles en las capturas. Siguiente: clasificar el inventario y redactar la nota estable.
+- 13:06 - Leídos portada, relevo, protocolo, guía y plantilla; comprobado `git status --short`. Identificadas 83 skills en el texto aportado y nueve servidores MCP visibles en las capturas. Siguiente: clasificar el inventario y redactar la nota estable.
+- 13:08 - Creada [[10_AGENT_CAPABILITIES]] con inventario clasificado, capacidades de Codex, límites de evidencia y protocolo de petición. Actualizadas las notas globales afectadas. Pendiente: validar enlaces y cerrar relevo.
+- 13:10 - Confirmados 83/83 nombres presentes en la nota; `git diff --check -- brain` sin errores de espacios (solo avisos LF/CRLF) y verificador del cerebro correcto.
 
 ## Validación
 
-- Pendiente: revisar nombres contra las fuentes aportadas y ejecutar `tools/check-brain.ps1`.
+- Inventario: comparación automatizada del listado con la nota, 83 skills de origen y cero ausentes.
+- Memoria: `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-brain.ps1`, `D:\CODEX`, 2026-09-15, `OK`; 21 notas, 59 enlaces, 6 fichas y 3 entradas de agente.
 - No se probará funcionalmente cada skill/MCP: la evidencia disponible demuestra que aparecen instalados/habilitados en la interfaz, no que sus credenciales, permisos o servicios respondan.
 
 ## Pendiente y primer paso
 
-- Crear `brain/10_AGENT_CAPABILITIES.md` con categorías, usos para Lumcards, límites y protocolo de petición/instalación.
+- No queda trabajo documental autorizado. En el próximo uso real de Antigravity, comprobar la carga de reglas y la herramienta asignada antes de depender de ella.
 
 ## Bloqueos y procesos
 
@@ -44,4 +47,4 @@ tags: [lumcards, tarea, agentes, capacidades]
 
 ## Cierre
 
-- Pendiente. Al terminar, enlazar esta ficha y [[08_HANDOFF]].
+- Inventario implementado y validado documentalmente en [[10_AGENT_CAPABILITIES]]. No se instalaron ni probaron conectores externos. Continuidad en [[08_HANDOFF]].

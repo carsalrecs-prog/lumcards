@@ -7,6 +7,13 @@ updated: 2026-09-15
 
 ## Confirmadas
 
+### 2026-09-15 — Inventario de capacidades sin permisos implícitos
+
+- Las capacidades observadas de Codex y Antigravity se registran en [[10_AGENT_CAPABILITIES]] para planificar relevos compatibles con cada herramienta.
+- Una skill o un servidor MCP instalado no demuestra autenticación ni concede permiso para desplegar, comprar, borrar, publicar o modificar servicios externos.
+- Si falta una capacidad, el agente documenta la necesidad, permisos, datos, coste, alternativa y prueba mínima; Richard decide la instalación o conexión de cuenta.
+- El inventario es una fotografía fechada y debe verificarse en la sesión ejecutora porque plugins, estados y permisos pueden cambiar.
+
 ### 2026-09-15 — Jerarquía canónica de carpetas y mazos
 
 - El motor normaliza tanto `U+001F` de paquetes modernos como `::` al formato persistente `::` usado por Lumcards.

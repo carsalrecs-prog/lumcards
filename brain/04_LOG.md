@@ -5,6 +5,19 @@ updated: 2026-09-15
 
 # Registro de trabajo
 
+## 2026-09-15 — Avances consolidados subidos a GitHub y desplegados en Vercel
+
+- Resultado: suite completa validada (87 pruebas Python y 5 suites Node/JS), activos sincronizados de `dist/` a `docs/`, exclusión de DLLs temporales de raíz en `.gitignore`, commit `8e0cec5` subido con éxito a `origin/main` en GitHub y despliegue en producción verificado en `https://lumcards.vercel.app` (código HTTP 200, scripts y estilos actualizados).
+- Archivos: `.gitignore`, `dist/`, `docs/`, `clean_engine.py`, `brain/` y archivos del repositorio.
+- Validación: suites automatizadas 100% OK, `git push origin main` con salida 0, comprobación HTTP directa de Vercel y `tools/check-brain.ps1` en `OK`. Ficha: [[tasks/2026-09-15-1307-antigravity-subir-github-desplegar-vercel]].
+
+## 2026-09-15 — Capacidades de Codex y Antigravity inventariadas
+
+- Resultado: registradas 83 skills declaradas y nueve servidores MCP visibles de Antigravity, además de las capacidades actuales de Codex, su aplicación probable a Lumcards y el protocolo para pedir herramientas nuevas.
+- Límites: inventario basado en capturas/listado aportados; no se probaron credenciales ni llamadas reales. Ninguna capacidad se trató como autorización para operar servicios externos.
+- Archivos: `brain/10_AGENT_CAPABILITIES.md`, portada, estado, backlog, decisiones, relevo y ficha.
+- Validación: 83/83 nombres presentes, `git diff --check -- brain` sin errores y `tools/check-brain.ps1` en `OK` (21 notas, 59 enlaces, 6 fichas, 3 entradas de agente). Ficha: [[tasks/2026-09-15-1306-codex-capacidades-agentes]].
+
 ## 2026-09-15 — Carpetas, renombrado y Mi progreso restaurados
 
 - Resultado: normalización y migración respaldada de jerarquías, fusión de duplicados sin pérdida de tarjetas, carpetas vacías persistentes, totales agregados, creación/movimiento/renombrado visibles y contrato completo de estadísticas detalladas.

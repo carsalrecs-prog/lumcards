@@ -9,6 +9,7 @@ updated: 2026-09-15
 
 - Codex, Claude Code y Antigravity tienen entradas de proyecto dirigidas a `AGENTS.md` y al mismo cerebro `brain/`.
 - Protocolo de checkpoints y relevo: [[07_PROTOCOL]], [[08_HANDOFF]]; uso y limites: [[09_GUIDE]].
+- Inventario observado de skills y MCP, sus límites y protocolo para pedir capacidades nuevas: [[10_AGENT_CAPABILITIES]].
 - 2026-09-13: estructura y deteccion de relevos invalidos verificadas. Carga efectiva en sesiones de Claude Code/Antigravity aun no verificada; no hay detector universal de tokens.
 
 ## Producto
@@ -45,9 +46,9 @@ updated: 2026-09-15
 
 ## Estado del repositorio
 
-- Rama `main` conectada a `origin/main`.
-- Existen cambios y numerosos archivos no rastreados. No asumir que todo está confirmado en Git.
-- `docs/` duplica una publicación estática y puede diferir de `dist/`; comprobar sincronización antes de publicar.
+- Rama `main` conectada y sincronizada con `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Avances consolidados confirmados y subidos a GitHub; despliegue automático activo en Vercel (`https://lumcards.vercel.app`).
+- `docs/` sincronizado con `dist/` para paridad completa con la PWA.
 
 ## Observaciones críticas
 
