@@ -6,12 +6,12 @@
   const tabs = Array.from(document.querySelectorAll('.play-tabs .btn'));
 
   const modeNames = {
-    learn: '🧠 Entrenador Neural',
-    match: '⚡ Ráfaga de Conexión',
-    flash: '🎴 Giro 3D Studio',
-    write: '✍️ Desafío de Memoria Activa',
-    test: '🏆 Arena de Simulación',
-    choice: '🎯 Duelo de Opciones'
+    learn: 'Aprender',
+    match: 'Emparejar',
+    flash: 'Tarjetas',
+    write: 'Escribir',
+    test: 'Examen',
+    choice: 'Elegir'
   };
 
   // ── Confetti Particle Engine (Zero-Dependencies) ───────────
@@ -25,6 +25,7 @@
       if (this.canvas) this.ctx = this.canvas.getContext('2d');
     },
     burst(count = 75) {
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
       this.init();
       if (!this.canvas || !this.ctx) return;
       this.canvas.width = window.innerWidth;
@@ -542,31 +543,29 @@
 
     const hero = node('section', { className: 'play-hero' }, [
       node('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px' }, [
-        text('span', '✦ LUMCARDS STUDIO · SUITE DE APRENDIZAJE INTELIGENTE', 'play-eyebrow'),
+        text('span', 'APRENDE PRACTICANDO', 'play-eyebrow'),
         node('div', { style: 'display:flex;gap:8px;align-items:center' }, [
           button(SoundFX.enabled ? '🔊 Sonido: Activado' : '🔇 Sonido: Silenciado', 'toggle-sound', { className: 'btn btn-quiet', style: 'font-size:12.5px;padding:6px 12px' }),
           button('⚙️ Opciones de estudio', 'study-options', { className: 'btn btn-quiet', style: 'font-size:12.5px;padding:6px 12px' })
         ])
       ]),
-      text('h1', 'Entrena, juega y domina cualquier mazo.'),
-      text('p', 'Suite interactiva con física 3D, emparejamiento con combos de velocidad, aprendizaje neural adaptativo y evaluación inteligente. Totalmente privado y guardado en tu equipo.')
+      text('h1', 'Otra forma de aprender.'),
+      text('p', 'Elige tus tarjetas y una actividad. Una sesión corta también cuenta.')
     ]);
 
     const settings = node('div', { className: 'play-settings' }, [
-      field('Elige un mazo para entrenar', deckSelect('practice-deck', state.deckId, true, false, state.loading)),
+      field('Tu mazo', deckSelect('practice-deck', state.deckId, true, false, state.loading)),
       field('Tarjetas por sesión', node('select', { id: 'practice-size', disabled: state.loading }, [5, 10, 20, 30, 50].map(size => node('option', { value: size, text: size + ' tarjetas', selected: state.size === size })))),
-      node('div', { style: 'align-self:flex-end;margin-bottom:4px' }, [
-        node('span', { className: 'play-universal-badge', text: '✓ Adaptador Universal 100% Activo (Texto + Imágenes + Audio)' })
-      ])
+
     ]);
 
     const modes = [
-      ['learn', '🧠', 'Entrenador Neural', 'Sistema adaptativo inteligente estilo Quizlet Plus. Clasifica tus tarjetas en "En progreso" y "Dominadas", reforzando tus puntos débiles con distractores dinámicos y atajos [1-4].', '★ Insignia Adaptativa'],
-      ['match', '⚡', 'Ráfaga de Conexión', 'Emparejamiento ultra-dinámico contrarreloj con multiplicadores de combo (x2, x3, x4), efectos sonoros ascendentes, tiles con imágenes y récord histórico al milisegundo.', '⚡ Velocidad Extrema'],
-      ['flash', '🎴', 'Giro 3D Studio', 'Modo inmersivo con física de volteo 3D en tiempo real, soporte HD para fotos de Anki, pronunciación con audio nativo y atajos táctiles [Espacio, 1-4].', '🎴 Giro 3D Pro'],
-      ['write', '✍️', 'Desafío de Memoria Activa', 'Memorización de alto impacto. Escribe la respuesta con motor Fuzzy que tolera acentos y pequeños deslices, con revelación inteligente de pistas.', '✍️ Memoria Activa'],
-      ['test', '🏆', 'Arena de Simulación', 'Simulacro completo con opción múltiple, Verdadero/Falso y redacción. Calificación con tarjeta de puntuación, medalla de maestría y corrección detallada.', '🏆 Simulación Real'],
-      ['choice', '🎯', 'Duelo de Opciones', 'Ronda relámpago de selección rápida. Entrena reflejos y reconocimiento inmediato con racha de aciertos continua y atajos numéricos directos.', '🎯 Reflejos Rápidos']
+      ['learn', '🧠', 'Aprender', 'Avanza paso a paso y vuelve a practicar lo que más te cuesta.', 'Paso a paso'],
+      ['match', '⚡', 'Emparejar', 'Encuentra cada pareja y mejora tu tiempo.', 'Con tiempo'],
+      ['flash', '🎴', 'Tarjetas', 'Piensa la respuesta y gira la tarjeta para comprobarla.', 'A tu ritmo'],
+      ['write', '✍️', 'Escribir', 'Recuerda la respuesta sin opciones ni pistas a la vista.', 'Memoria activa'],
+      ['test', '🏆', 'Examen', 'Comprueba lo aprendido y revisa tus respuestas al terminar.', 'Autoevaluación'],
+      ['choice', '🎯', 'Elegir', 'Escoge la respuesta correcta entre varias opciones.', 'Ronda rápida']
     ];
 
     const modeCards = modes.map(([mode, symbol, title, description, tag]) => node('article', { className: 'play-mode' }, [
@@ -576,14 +575,14 @@
       ]),
       text('h2', title),
       text('p', description),
-      button(state.loading ? 'Preparando…' : 'Comenzar ' + title, 'start', { 'data-mode': mode, className: 'btn btn-primary', disabled: state.loading || !state.ready })
+      button(state.loading ? 'Preparando…' : 'Empezar', 'start', { 'data-mode': mode, 'aria-label': 'Empezar ' + title, className: 'btn btn-primary', disabled: state.loading || !state.ready })
     ]));
 
     content.replaceChildren(
       hero,
       settings,
       node('div', { className: 'play-modes' }, modeCards),
-      text('p', '✓ Compatibilidad universal total: Las tarjetas con imágenes, fórmulas matemáticas KaTeX, audio nativo, huecos (cloze), notas de vocabulario multicampo y reversas se adaptan automáticamente a todos los juegos. El progreso de repaso de tu colección principal se mantiene intacto.', 'play-note')
+      text('p', 'La práctica se guarda por separado de tus repasos. Algunas tarjetas pueden necesitar ajustes para usarse en los juegos.', 'play-note')
     );
 
     if (!state.ready) content.append(button('Volver a cargar los mazos', 'reload'));

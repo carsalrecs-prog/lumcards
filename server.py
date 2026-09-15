@@ -19,7 +19,6 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from engine import Engine
 from practice_store import PracticeStore
 from text_import import parse_cards
-from anki.collection import ExportAnkiPackageOptions, DeckIdLimit
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent
@@ -138,7 +137,7 @@ class Handler(BaseHTTPRequestHandler):
                     if deck_id:
                         did = self.engine._deck_id(deck_id)
                         path = Path(tmp) / 'mazo-lumcards.apkg'
-                        self.engine.col.export_anki_package(out_path=str(path), options=ExportAnkiPackageOptions(with_scheduling=True, with_deck_configs=True, with_media=True, legacy=False), limit=DeckIdLimit(deck_id=did))
+                        self.engine.export_deck_package(did, path)
                     else:
                         path = Path(tmp) / 'coleccion-lumcards.colpkg'
                         self.engine.export_collection(path)
@@ -154,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not path.is_relative_to(vendor):
                     raise ValueError('Archivo de aplicación no válido.')
                 self.file(path)
-            elif route in ('/', '/index.html', '/app.js', '/app.css', '/icon.svg',
+            elif route in ('/', '/index.html', '/app.js', '/app.css', '/student.css', '/icon.svg',
                            '/practice.html', '/practice.css', '/practice.js', '/study-games.js', '/sync-manager.js'):
                 self.file(ROOT / 'dist' / ('index.html' if route == '/' else route[1:]))
             else:
@@ -254,8 +253,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.practice.save(body)
             elif route == '/api/import/text/commit':
                 result = self.engine.import_text_cards(body.get('deckId'), body.get('cards'))
-            elif route in ('/api/decks', '/api/folders'):
+            elif route == '/api/decks':
                 result = self.engine.add_deck(body.get('name', ''))
+            elif route == '/api/folders':
+                result = self.engine.create_folder(body.get('name', ''))
             elif route == '/api/decks/rename':
                 result = self.engine.rename_deck(body.get('id'), body.get('name', ''))
             elif route == '/api/decks/move':
@@ -339,7 +340,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Anki 2.0 — app personal local')
+    parser = argparse.ArgumentParser(description='Lumcards — app personal local')
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--data-dir', default=str(ROOT / 'data'))
@@ -352,7 +353,7 @@ def main():
     server.timeout = 1
     server.stop_requested = False
     local_ip = engine.get_local_ip()
-    print(f'Anki 2.0 listo en http://127.0.0.1:{args.port} (Red local: http://{local_ip}:{args.port})', flush=True)
+    print(f'Lumcards listo en http://127.0.0.1:{args.port} (Red local: http://{local_ip}:{args.port})', flush=True)
     print(f'Datos guardados en {engine.data_dir}', flush=True)
     try:
         while not server.stop_requested:

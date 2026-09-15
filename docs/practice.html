@@ -9,28 +9,37 @@
   <link rel="stylesheet" href="/app.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <link rel="stylesheet" href="/practice.css">
+  <link rel="stylesheet" href="/student.css?v=20260914">
+  <link rel="manifest" href="/manifest.json">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
   <script defer src="/study-games.js"></script>
   <script defer src="/practice.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </head>
 <body>
   <header class="play-header">
     <a class="btn" href="/">← Mi biblioteca</a>
     <div class="play-header-brand">
       <div class="play-brand-mark">L<span>✦</span></div>
-      <strong>Lumcards Studio</strong>
+      <strong>Lumcards</strong>
     </div>
     <span class="play-header-tag">Suite de Aprendizaje Dinámico</span>
   </header>
   <main class="play-main">
     <nav class="play-tabs" aria-label="Práctica e importación">
-      <button class="btn active" data-tab="play">🎮 Modos de Juego</button>
-      <button class="btn" data-tab="import">📥 Importar texto</button>
-      <button class="btn" data-tab="history">📊 Mis resultados</button>
+      <button class="btn active" data-tab="play">Practicar</button>
+      <button class="btn" data-tab="import">Importar texto</button>
+      <button class="btn" data-tab="history">Mis resultados</button>
     </nav>
     <p id="play-status" role="status" aria-live="polite"></p>
-    <div id="play-content"><p>Abriendo tu colección y preparando la suite de juegos…</p></div>
+    <div id="play-content"><p>Preparando tus mazos…</p></div>
   </main>
   <canvas id="confetti-canvas"></canvas>
 </body>

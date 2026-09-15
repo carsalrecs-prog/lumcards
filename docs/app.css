@@ -234,3 +234,32 @@ body.in-study dialog .icon-button:hover{color:#ffffff;background:#232d3f}
 .styler-flip-pill { align-self: center; font-size: 12px; font-weight: 600; padding: 6px 16px; border-radius: 20px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); transition: all .15s ease; }
 .styler-flip-pill:hover { color: var(--text); border-color: var(--primary, #6366f1); }
 
+/* ── Storage Destination Choice ── */
+.storage-choice-card {
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 2px solid var(--line);
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  text-align: left;
+}
+.storage-choice-card:hover {
+  border-color: var(--primary, #6366f1);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.12);
+}
+.storage-choice-card.active-storage {
+  border-color: var(--primary, #6366f1);
+  background: var(--soft, rgba(99, 102, 241, 0.08));
+  box-shadow: 0 0 0 1px var(--primary, #6366f1);
+}
+.badge-active {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #10b981 !important;
+  font-weight: 700 !important;
+}

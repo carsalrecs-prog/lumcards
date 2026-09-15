@@ -1,0 +1,58 @@
+/* ── Flashcard 3D Flip ── */
+.flashcard-3d {
+  perspective: 1200px;
+}
+
+.flashcard-3d > * {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+/* ── Match Mode Tiles ── */
+.match-tile {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.match-tile:hover {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
+}
+
+.match-tile.matched {
+  animation: matchPop 0.4s ease-out forwards;
+}
+
+@keyframes matchPop {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); box-shadow: 0 0 30px rgba(16, 185, 129, 0.4); }
+  100% { transform: scale(0); opacity: 0; }
+}
+
+/* ── Score Counter Animation ── */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.score-counter {
+  animation: countUp 0.6s ease-out;
+}
+
+/* ── Streak Fire Effect ── */
+.streak-fire {
+  animation: fireGlow 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes fireGlow {
+  from { text-shadow: 0 0 10px rgba(245, 158, 11, 0.3); }
+  to { text-shadow: 0 0 20px rgba(245, 158, 11, 0.6), 0 0 40px rgba(245, 158, 11, 0.3); }
+}
+
+/* ── Progress Ring ── */
+.progress-ring circle {
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Safe area for mobile bottom nav ── */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}

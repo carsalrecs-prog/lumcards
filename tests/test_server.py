@@ -63,12 +63,19 @@ class ServerTests(unittest.TestCase):
     def test_01_static_and_initial_state(self):
         page = self.request('/', raw=True).decode()
         self.assertIn('lang="es"', page)
-        self.assertIn('/app.js', page)
+        self.assertIn('/app.js?v=20260915', page)
         state = self.request('/api/state')
         self.assertEqual(state['stats']['totalCards'], 13)
         self.assertEqual(state['stats']['reviewedToday'], 0)
         self.assertEqual(sum(d['due'] for d in state['decks']), 13)
         self.assertTrue(all(d['childIds'] for d in state['decks']))
+
+    def test_student_stylesheet_is_served_for_both_screens(self):
+        for route in ('/', '/practice.html'):
+            self.assertIn('/student.css?v=20260914', self.request(route, raw=True).decode())
+        with urllib.request.urlopen(self.url + '/student.css?v=20260914') as response:
+            self.assertIn('text/css', response.headers['Content-Type'])
+            self.assertIn(b'.study-tools-grid', response.read())
 
     def test_02_create_edit_review_export_and_delete(self):
         deck = self.request('/api/decks', {'name': 'Prueba HTTP'})
@@ -102,6 +109,33 @@ class ServerTests(unittest.TestCase):
             urllib.request.urlopen(req)
         self.assertEqual(err.exception.code, 400)
         self.assertEqual(self.request('/api/state')['stats']['totalCards'], before)
+
+    def test_02b_folder_move_rename_and_detailed_stats_contract(self):
+        folder = self.request('/api/folders', {'name': 'Idiomas HTTP'})
+        initial_folder = next(d for d in self.request('/api/state')['decks'] if d['id'] == folder['id'])
+        self.assertTrue(initial_folder['isFolder'])
+
+        deck = self.request('/api/decks', {'name': 'Verbos HTTP'})
+        self.request('/api/decks/move', {'deckId': deck['id'], 'parentId': folder['id']})
+        self.request('/api/cards', {'deckId': deck['id'], 'front': 'go', 'back': 'ir'})
+        self.request('/api/decks/rename', {'id': deck['id'], 'name': 'Verbos frecuentes'})
+        self.request('/api/decks/rename', {'id': folder['id'], 'name': 'Idiomas'})
+
+        state = self.request('/api/state')
+        folder_state = next(d for d in state['decks'] if d['id'] == folder['id'])
+        deck_state = next(d for d in state['decks'] if d['id'] == deck['id'])
+        self.assertEqual(folder_state['total'], 1)
+        self.assertEqual(deck_state['name'], 'Idiomas::Verbos frecuentes')
+        self.assertEqual(deck_state['parentName'], 'Idiomas')
+
+        stats = self.request('/api/stats/detailed?deckId=' + str(folder['id']))
+        self.assertEqual(stats['cardBreakdown']['total'], 1)
+        self.assertEqual(len(stats['forecast']['days30']), 31)
+        self.assertEqual(len(stats['history']['days365']), 366)
+        self.assertEqual(len(stats['hourly']['days90']), 24)
+
+        self.request('/api/delete', {'type': 'deck', 'id': deck['id']})
+        self.request('/api/delete', {'type': 'deck', 'id': folder['id']})
 
     def test_04_reject_foreign_mutations_and_path_escape(self):
         for route, body, headers in [('/api/decks', {'name': 'forbidden'}, {'Origin': 'https://example.com'}), ('/api/export', None, {'Sec-Fetch-Site': 'cross-site'}), ('/api/state', None, {'Host': 'evil.example'}), ('/media/..%2Fcollection.anki2', None, {})]:

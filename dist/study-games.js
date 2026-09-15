@@ -94,17 +94,17 @@
       if (!((typeof id === 'string' && id.trim()) || (typeof id === 'number' && Number.isFinite(id)))) {
         id = 'study-card-' + index;
       }
-      var candidate = Object.assign({}, card, { id: id, front: front, back: back, frontKey: frontKey, backKey: backKey });
-      candidates.push(candidate);
+      var candidate = Object.assign({}, card, { id: id, front: front, back: back });
+      candidates.push({ card: candidate, frontKey: frontKey, backKey: backKey });
     });
     var cards = [];
     var seenFronts = new Set();
     var seenIds = new Set();
-    candidates.forEach(function (card) {
-      if (answersByFront.get(card.frontKey).size !== 1 || seenFronts.has(card.frontKey) || seenIds.has(String(card.id))) return;
-      seenFronts.add(card.frontKey);
-      seenIds.add(String(card.id));
-      cards.push(card);
+    candidates.forEach(function (item) {
+      if (answersByFront.get(item.frontKey).size !== 1 || seenFronts.has(item.frontKey) || seenIds.has(String(item.card.id))) return;
+      seenFronts.add(item.frontKey);
+      seenIds.add(String(item.card.id));
+      cards.push(item.card);
     });
     return { cards: cards, skipped: input.length - cards.length };
   }

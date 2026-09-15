@@ -19,6 +19,9 @@
   "author": "carsalrecs-prog",
   "license": "MIT",
   "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "firebase": "^12.19.0"
   }
 }

@@ -241,14 +241,14 @@ namespace LumcardsDesktop
         private void SetupTray()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("Abrir Anki 2.0", null, (sender, e) => RestoreApp());
+            menu.Items.Add("Abrir Lumcards", null, (sender, e) => RestoreApp());
             menu.Items.Add("Carpeta de datos", null, (sender, e) => Process.Start("explorer.exe", "\"" + Path.Combine(options.AppDir, "data") + "\""));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Salir y detener el servidor", null, async (sender, e) => await ExitAsync());
-            tray = new NotifyIcon { Text = "Anki 2.0", Icon = Icon, ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Text = "Lumcards", Icon = Icon, ContextMenuStrip = menu, Visible = true };
             tray.DoubleClick += (sender, e) => RestoreApp();
-            activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Anki2DesktopActivate");
-            closeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\Anki2DesktopClose");
+            activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\LumcardsDesktopActivate");
+            closeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\LumcardsDesktopClose");
             activateWait = ThreadPool.RegisterWaitForSingleObject(activateEvent, (state, timedOut) => SafeInvoke(RestoreApp), null, -1, false);
             closeWait = ThreadPool.RegisterWaitForSingleObject(closeEvent, (state, timedOut) => SafeInvoke(async () => await ExitAsync()), null, -1, false);
         }
@@ -270,7 +270,7 @@ namespace LumcardsDesktop
                 await Task.Run(() =>
                 {
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(new Uri(options.Url, "/api/shutdown"));
-                    request.Method = "POST"; request.ContentType = "application/json"; request.Headers["X-Anki-Request"] = "1"; request.Timeout = 30000; request.Proxy = null;
+                    request.Method = "POST"; request.ContentType = "application/json"; request.Headers["X-Lumcards-Request"] = "1"; request.Headers["X-Anki-Request"] = "1"; request.Timeout = 30000; request.Proxy = null;
                     byte[] body = Encoding.UTF8.GetBytes("{}"); request.ContentLength = body.Length;
                     using (Stream stream = request.GetRequestStream()) stream.Write(body, 0, body.Length);
                     using (request.GetResponse()) { }

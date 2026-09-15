@@ -1,0 +1,8 @@
+{
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "folder",
+  "newFileFolderPath": "brain/inbox",
+  "attachmentFolderPath": "brain/attachments",
+  "showLineNumber": true,
+  "strictLineBreaks": false
+}

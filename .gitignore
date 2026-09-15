@@ -9,3 +9,11 @@ __pycache__/
 *.colpkg
 *.apkg
 node_modules/
+.firebase/
+android/.gradle/
+android/**/build/
+tools/practice-ui-session.json
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+/*.dll

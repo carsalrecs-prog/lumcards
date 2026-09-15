@@ -1,0 +1,7 @@
+{
+  "name": "lumcards-dist",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "echo 'Static assets ready'"
+  }
+}

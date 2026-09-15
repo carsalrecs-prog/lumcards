@@ -193,8 +193,42 @@ function getWebData() {
   return initial;
 }
 
+let cloudSyncDebounce = null;
 function saveWebData(store) {
   try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(store)); } catch(_) {}
+  if (window.LumcardsSync?.firebase?.isConnected()) {
+    clearTimeout(cloudSyncDebounce);
+    cloudSyncDebounce = setTimeout(async () => {
+      try {
+        await window.LumcardsSync.firebase.syncFullWorkspace(store);
+      } catch (e) {
+        console.warn('Auto cloud sync warning:', e);
+      }
+    }, 1200);
+  }
+}
+
+async function syncFromCloudIfAvailable() {
+  if (window.LumcardsSync?.firebase?.isConnected()) {
+    try {
+      const cloudData = await window.LumcardsSync.firebase.pullFullWorkspace();
+      const localStore = getWebData();
+      if (cloudData && cloudData.decks && cloudData.decks.length > 0) {
+        localStore.decks = cloudData.decks;
+        localStore.cards = cloudData.cards || [];
+        if (cloudData.stats) localStore.stats = cloudData.stats;
+        if (cloudData.settings) localStore.settings = cloudData.settings;
+        try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(localStore)); } catch(_) {}
+        return true;
+      } else if (localStore && localStore.decks && localStore.decks.length > 0) {
+        // Primera sincronización: respaldar los mazos locales existentes en la nube
+        await window.LumcardsSync.firebase.syncFullWorkspace(localStore);
+      }
+    } catch (e) {
+      console.warn('Sync on login error:', e);
+    }
+  }
+  return false;
 }
 
 function webApi(path, body, method) {
@@ -203,6 +237,21 @@ function webApi(path, body, method) {
   const params = new URLSearchParams(queryString || '');
 
   if (route === 'state') {
+    let hierarchyChanged = false;
+    store.decks.forEach(deck => {
+      const parts = String(deck.name || '').replace(/\x1f/g, '::').split('::');
+      const normalizedName = parts.join('::');
+      const shortName = deck.shortName || parts.at(-1);
+      const parentName = deck.parentName || parts.slice(0, -1).join('::');
+      hierarchyChanged ||= deck.name !== normalizedName || deck.shortName !== shortName || deck.parentName !== parentName;
+      Object.assign(deck, {name:normalizedName,shortName,parentName});
+    });
+    store.decks.forEach(deck => {
+      const isFolder = Boolean(deck.isFolder || store.decks.some(other => other !== deck && other.parentName === deck.name));
+      hierarchyChanged ||= deck.isFolder !== isFolder;
+      deck.isFolder = isFolder;
+    });
+    if (hierarchyChanged) saveWebData(store);
     return {
       decks: store.decks,
       cards: store.cards.slice(0, 50),
@@ -294,16 +343,21 @@ function webApi(path, body, method) {
     const c = store.cards.find(x => String(x.id) === String(cardId));
     return c || { id: cardId, front: 'Tarjeta no encontrada', back: '' };
   }
-  if (route === 'decks') {
+  if (route === 'decks' || route === 'folders') {
     if (method === 'POST' && body) {
+      const normalizedName = String(body.name || (route === 'folders' ? 'Nueva carpeta' : 'Nuevo mazo')).replace(/\x1f/g, '::').trim();
+      const parts = normalizedName.split('::').filter(Boolean);
       const newD = {
         id: Date.now(),
-        name: body.name || 'Nuevo mazo',
+        name: parts.join('::'),
+        shortName: parts.at(-1),
         total: 0,
         new: 0,
         learn: 0,
         due: 0,
-        parentName: null
+        parentName: parts.slice(0, -1).join('::'),
+        isFolder: route === 'folders',
+        childIds: []
       };
       store.decks.push(newD);
       saveWebData(store);
@@ -315,10 +369,32 @@ function webApi(path, body, method) {
     const d = store.decks.find(x => String(x.id) === String(body.deckId));
     if (d) {
       const parent = store.decks.find(x => String(x.id) === String(body.parentId));
-      d.parentName = parent ? parent.name : null;
+      const shortName = d.shortName || d.name.split('::').at(-1);
+      d.parentName = parent ? parent.name : '';
+      d.name = parent ? parent.name + '::' + shortName : shortName;
+      d.shortName = shortName;
       saveWebData(store);
     }
     return { success: true };
+  }
+  if (route === 'decks/rename' && body) {
+    const d = store.decks.find(x => String(x.id) === String(body.id));
+    if (!d) throw new Error('El mazo o la carpeta ya no existe.');
+    const oldName = d.name;
+    const shortName = String(body.name || '').trim();
+    if (!shortName) throw new Error('Escribe un nombre válido.');
+    d.name = d.parentName ? d.parentName + '::' + shortName : shortName;
+    d.shortName = shortName;
+    if (d.isFolder) {
+      store.decks.forEach(child => {
+        if (child.parentName === oldName) {
+          child.parentName = d.name;
+          child.name = d.name + '::' + (child.shortName || child.name.split('::').at(-1));
+        }
+      });
+    }
+    saveWebData(store);
+    return d;
   }
   if (route === 'decks/config') {
     return { newPerDay: 20, revPerDay: 200 };
@@ -370,13 +446,32 @@ function webApi(path, body, method) {
     return { success: true };
   }
   if (route === 'stats' || route === 'stats/detailed') {
+    const today = new Date();
+    const iso = value => value.toISOString().slice(0, 10);
+    const history = days => Array.from({length: days + 1}, (_, index) => {
+      const ago = days - index, current = new Date(today);
+      current.setDate(current.getDate() - ago);
+      return {date: iso(current), daysAgo: -ago, reviews: ago === 0 ? (store.stats.reviewedToday || 0) : 0, timeMinutes: 0};
+    });
+    const forecast = days => Array.from({length: days + 1}, (_, day) => ({day, due: 0}));
+    const calendarDays = [];
+    const start = new Date(today.getFullYear(), 0, 1), end = new Date(today.getFullYear(), 11, 31);
+    for (let current = new Date(start); current <= end; current.setDate(current.getDate() + 1)) calendarDays.push({date: iso(current), dayOfWeek: current.getDay(), count: 0, timeSeconds: 0});
+    const emptyPart = (label,color) => ({count:0,pct:0,label,color});
+    const emptyHourly = () => Array.from({length:24},(_,hour)=>({hour,reviews:0,correct:0,rate:null}));
+    const emptyButtons = () => ({learning:{1:0,2:0,3:0,4:0},young:{1:0,2:0,3:0,4:0},mature:{1:0,2:0,3:0,4:0}});
+    const added = series => ({total: store.cards.length, series});
     return {
-      history: [{ date: 'Hoy', reviews: store.stats.reviewedToday || 0, timeMin: 5 }],
-      forecast: [{ day: 1, due: 6 }, { day: 2, due: 4 }],
-      retention: { matureCount: 8, youngCount: 3, matureRate: 92 },
-      hourly: Array.from({ length: 24 }, (_, i) => ({ hour: i, count: i >= 9 && i <= 21 ? 2 : 0 })),
-      buttons: { 1: 2, 2: 3, 3: 15, 4: 8 },
-      calendar: [{ date: new Date().toISOString().slice(0, 10), count: 8 }]
+      today:{cardsStudied:store.stats.reviewedToday||0,timeSeconds:0,timeMinutes:0,avgSecondsPerCard:0,retentionToday:null,reviewCount:0,learnCount:0},
+      forecast:{days30:forecast(30),days90:forecast(90),days365:forecast(365),total30:0,total90:0,total365:0,dueTomorrow:0,avgDaily30:0,dailyLoad:0},
+      calendar:{year:today.getFullYear(),availableYears:[today.getFullYear()],days:calendarDays,totalReviews:0,daysStudied:0},
+      history:{days30:history(30),days90:history(90),days365:history(365),daysStudied30:0,pctDaysStudied30:0,totalReviews30:store.stats.reviewedToday||0,totalMinutes30:0,avgReviewsPerDay30:0,avgReviewsPerStudiedDay30:0},
+      cardBreakdown:{total:store.cards.length,new:emptyPart('Nuevas','#5bb1e8'),learning:emptyPart('Aprendiendo','#f97316'),relearning:emptyPart('Reaprendiendo','#ef4444'),young:emptyPart('Jóvenes','#86efac'),mature:emptyPart('Maduras','#22c55e'),suspended:emptyPart('Suspendidas','#eab308'),buried:emptyPart('Enterradas','#94a3b8')},
+      intervals:{distribution:[],avgInterval:0,maxInterval:0,totalReviewCards:0},ease:{distribution:[],avgEase:250,totalCardsWithEase:0},
+      retention:{young:{total:0,correct:0,rate:null},mature:{total:0,correct:0,rate:null},all:{total:0,correct:0,rate:null}},
+      retentionTable:['Hoy','Ayer','La semana pasada','El mes pasado','El año pasado'].map((label,index)=>({key:String(index),label,young:'N/A',youngNum:null,mature:'N/A',matureNum:null,total:'N/A',totalNum:null,count:0})),
+      hourly:{days30:emptyHourly(),days90:emptyHourly(),days365:emptyHourly()},buttonPresses:{days30:emptyButtons(),days90:emptyButtons(),days365:emptyButtons()},
+      addedCards:{days30:added([]),days90:added([]),days365:added([]),all:added(store.cards.map(card=>({date:iso(new Date(Number(card.id)||Date.now())),count:1})))},
     };
   }
   if (route === 'sync/info') {
@@ -447,8 +542,63 @@ const palettes=[['#edf0ff','#818ac9','language'],['#e7f5ef','#58a388','globe'],[
 function deckPalette(d,i){const n=d.name.toLowerCase();if(n.includes('ingl'))return palettes[0];if(n.includes('cultura'))return palettes[1];if(n.includes('aprender'))return palettes[2];return palettes[i%palettes.length];}
 function getDue(d){return Number(d.due||0);}
 function getStats(){const s=data.stats;return {...s,totalCards:s.totalCards??data.cards.length,dueToday:s.dueToday??data.decks.reduce((n,d)=>n+getDue(d),0),reviewedToday:s.reviewedToday||0,streak:s.streak||0};}
-function shell(content){const names={decks:'Mis mazos',stats:'Estadísticas',favorites:'Favoritos',sync:'Sincronización',backups:'Copias de seguridad',settings:'Ajustes',cards:'Explorar tarjetas',study:'Repaso'}; const nav=(id,name,ic,extra='')=>`<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}">${icon(ic)}${name}${extra}</button>`;
-return `<div class="app-layout"><aside class="sidebar" aria-label="Navegación principal"><div class="brand"><div class="brand-mark">L<span>✦</span></div><div><div class="brand-name">Lumcards</div><div class="brand-caption">Tu espacio de estudio</div></div></div><div class="nav-label">BIBLIOTECA</div><nav class="nav">${nav('decks','Mis mazos','layers',`<span class="badge">${data.decks.length}</span>`)}${nav('cards','Explorar tarjetas','search')}${nav('stats','Estadísticas','chart')}${nav('favorites','Favoritos','star')}<a class="nav-item" href="/practice.html" style="text-decoration:none">${icon('spark')}Jugar y aprender</a></nav><div class="nav-separator"></div><div class="nav-label">MI ESPACIO</div><nav class="nav">${nav('sync','Sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}</nav><div class="sidebar-bottom"><div class="tip-box">${icon('bulb')}<strong>Un poco, todos los días.</strong><p>Una sesión corta hoy vale más que dejarlo todo para mañana.</p></div><div class="profile"><div class="avatar">R</div><div><strong>Mi espacio personal</strong><span>Guardado en este equipo</span></div>${icon('shield')}</div></div></aside><div class="workspace"><header class="topbar"><button class="icon-button mobile-toggle" data-action="menu" aria-label="Abrir menú">${icon('menu')}</button><div class="breadcrumb">Mi espacio <span>/</span><strong>${names[view]||'Sincronización'}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="global-search" type="search" placeholder="Buscar en tu biblioteca…" aria-label="Buscar en tu biblioteca" value="${esc(search)}"><kbd>Ctrl K</kbd></label><button class="icon-button" data-action="nav" data-view="sync" title="Sincronización móvil y P2P" aria-label="Sincronización">${icon('cloud')}</button><button class="icon-button" data-action="theme" aria-label="${theme==='dark'?'Activar tema claro':'Activar tema oscuro'}">${icon(theme==='dark'?'sun':'moon')}</button><button class="icon-button" data-action="help" aria-label="Ayuda y atajos">${icon('help')}</button></div></header><main class="main" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('cloud')}Guardado automáticamente en tu PC</span><span>Hecho para aprender a tu ritmo. <span style="color:var(--orange)">✦</span></span></footer></main></div></div>`;}
+function shell(content){const names={decks:'Mis mazos',stats:'Estadísticas',favorites:'Favoritos',sync:'Sincronización',backups:'Copias de seguridad',settings:'Ajustes',cards:'Explorar tarjetas',study:'Repaso'}; const nav=(id,name,ic,extra='')=>`<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}" ${view===id?'aria-current="page"':''}>${icon(ic)}${name}${extra}</button>`;
+const fbUser = window.LumcardsSync?.firebase?.getUser();
+const userInitial = fbUser ? esc((fbUser.name || fbUser.email || 'G')[0].toUpperCase()) : 'L';
+const avatarHtml = fbUser?.photoURL ? `<img src="${esc(fbUser.photoURL)}" class="avatar" style="width:32px;height:32px;border-radius:50%;object-fit:cover" alt="Google Avatar">` : `<div class="avatar">${userInitial}</div>`;
+const userTitle = fbUser ? esc(fbUser.name || fbUser.email.split('@')[0]) : 'Mi espacio personal';
+const userSubtitle = fbUser ? (fbUser.isLocalSession ? 'Modo local' : '● Sincronizado en Google') : 'Guardado en este equipo';
+return `<div class="app-layout">
+<aside class="sidebar" id="sidebar" aria-label="Navegación principal">
+<div class="brand"><div class="brand-mark">L<span>✦</span></div><div><div class="brand-name">Lumcards</div><div class="brand-caption">Aprende a tu ritmo</div></div><button class="icon-button sidebar-close" data-action="close-menu" aria-label="Cerrar menú">${icon('close')}</button></div>
+<div class="nav-label">TU ESTUDIO</div><nav class="nav">${nav('decks','Mi biblioteca','layers',`<span class="badge">${data.decks.length}</span>`)}${nav('cards','Tarjetas','search')}<a class="nav-item" href="/practice.html">${icon('spark')}Jugar y aprender</a>${nav('stats','Mi progreso','chart')}${nav('favorites','Favoritos','star')}</nav>
+<details class="workspace-options" ${['sync','backups','settings'].includes(view)?'open':''}><summary>Mi espacio ${icon('chevron')}</summary><nav class="nav">${nav('sync','Sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}</nav></details>
+<div class="sidebar-bottom"><p class="sidebar-note">Un poco, todos los días.</p><button type="button" class="profile" data-action="nav" data-view="sync" aria-label="Cuenta y sincronización">${avatarHtml}<span class="profile-copy"><strong>${userTitle}</strong><span>${userSubtitle}</span></span>${icon(fbUser ? 'cloud' : 'shield')}</button></div>
+</aside><button class="nav-scrim" data-action="close-menu" tabindex="-1" aria-label="Cerrar navegación"></button>
+<div class="workspace"><header class="topbar"><button class="icon-button mobile-toggle" data-action="menu" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false">${icon('menu')}</button><div class="breadcrumb"><strong>${names[view]||'Mi biblioteca'}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="global-search" type="search" placeholder="Buscar tarjetas o mazos" aria-label="Buscar en tu biblioteca" value="${esc(search)}"><kbd>Ctrl K</kbd></label><button class="icon-button" data-action="theme" aria-label="${theme==='dark'?'Activar tema claro':'Activar tema oscuro'}">${icon(theme==='dark'?'sun':'moon')}</button><button class="icon-button" data-action="help" aria-label="Ayuda y atajos">${icon('help')}</button></div></header>
+<main class="main view-${view}" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('shield')}${fbUser && !fbUser.isLocalSession ? 'Cuenta conectada' : 'Guardado en este equipo'}</span><span>A tu ritmo, cada día.</span></footer></main></div></div>`;}
+
+
+function studyTools(){
+  showModal('Herramientas de estudio','Elige lo que necesitas para esta sesión.',`<div class="study-tools-grid">${[
+    ['new-card','plus','Crear tarjeta','Una pregunta, una idea que recordar.'],
+    ['exam-modal','target','Modo examen','Ponte a prueba con tus mazos.'],
+    ['new-image-occlusion','image','Oclusión de imagen','Aprende ocultando partes de una imagen.'],
+    ['convert-notes','spark','Convertir apuntes','Prepara tarjetas a partir de tus notas.'],
+    ['new-folder','folder','Crear carpeta','Agrupa tus mazos por asignatura.']
+  ].map(([action,ic,title,description])=>`<button class="study-tool" data-action="${action}">${icon(ic)}<span><strong>${title}</strong><small>${description}</small></span>${icon('chevron')}</button>`).join('')}</div>`);
+}
+function setMobileMenu(open){
+  const sidebar=$('#sidebar'), trigger=$('[data-action="menu"]');
+  if(!sidebar||!trigger)return;
+  sidebar.classList.toggle('open',open);
+  document.body.classList.toggle('menu-open',open);
+  trigger.setAttribute('aria-expanded',String(open));
+  if(open) sidebar.querySelector('button')?.focus(); else trigger.focus();
+}
+document.addEventListener('keydown',e=>{
+  if(!document.body.classList.contains('menu-open'))return;
+  if(e.key==='Escape'){e.preventDefault();setMobileMenu(false);return;}
+  if(e.key==='Tab'){
+    const items=[...$('#sidebar').querySelectorAll('button,a,summary')].filter(el=>el.getClientRects().length);
+    const first=items[0],last=items[items.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
+  }
+});
+window.matchMedia?.('(max-width: 650px)')?.addEventListener?.('change',()=>{
+  if(document.body.classList.contains('menu-open'))setMobileMenu(false);
+});
+document.addEventListener('click',e=>{
+  document.querySelectorAll('.deck-options[open]').forEach(detail=>{
+    if(!detail.contains(e.target)||e.target.closest('[data-action]'))detail.open=false;
+  });
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') document.querySelectorAll('.deck-options[open]').forEach(detail=>{
+    detail.open=false;detail.querySelector('summary')?.focus();
+  });
+});
 function statsStrip(){const s=getStats();return `<div class="stats-strip">${[['layers','Tarjetas en tu biblioteca',num(s.totalCards),''],['flame','Racha de estudio',num(s.streak),s.streak===1?'día':'días'],['check','Repasadas hoy',num(s.reviewedToday),''],['target','Retención',s.retention==null?'—':Math.round(s.retention)+'%','']].map(([ic,label,value,unit])=>`<div class="stat"><span class="stat-icon">${icon(ic)}</span><div><div class="stat-label">${label}</div><div class="stat-number">${value}<small>${unit}</small></div></div></div>`).join('')}</div>`;}
 function dashboard(){
   const s=getStats(), goal=data.settings.dailyGoal||20, pct=Math.min(100,Math.round(s.reviewedToday/goal*100));
@@ -466,20 +616,18 @@ function dashboard(){
   if(sort==='name')decks.sort((a,b)=>a.name.localeCompare(b.name));
   if(sort==='due')decks.sort((a,b)=>getDue(b)-getDue(a));
 
-  const topButtons = button('Modo Examen','exam-modal','target','btn-dark') +
-                     button('Oclusión de imagen','new-image-occlusion','image') +
-                     button('Convertir apuntes','convert-notes','spark') +
-                     button('Importar mazo','import','upload') +
+  const topButtons = button('Herramientas','study-tools','spark') +
+                     button('Importar','import','upload') +
                      button('Crear carpeta','new-folder','folder') +
-                     button('Crear mazo','new-deck','plus','btn-primary');
+                     button('Crear mazo','new-deck','plus');
 
   return `<p class="eyebrow">${esc(new Intl.DateTimeFormat('es-PE',{weekday:'long',day:'numeric',month:'long'}).format(new Date()))}</p>
-  ${heading('Tu próximo paso empieza aquí.', 'Un nuevo día para conectar ideas y recordar un poco más.', topButtons)}
+  ${heading('Tu espacio para aprender.', 'Elige un mazo. Encuentra tu ritmo.', topButtons)}
   <div class="welcome-grid">
     <section class="focus-panel">
       <div>
-        <div class="section-kicker">${icon('spark')} TU MOMENTO DE ENFOQUE</div>
-        <h2>${s.dueToday?'Dale espacio a lo que aprendes.':'Todo listo para seguir aprendiendo.'}</h2>
+        <div class="section-kicker">${icon('spark')} TU SESIÓN DE HOY</div>
+        <h2>${s.dueToday?'Un poco hoy. Mucho mañana.':'Todo al día. Respira y sigue.'}</h2>
         <p>${s.dueToday?`Tienes ${num(s.dueToday)} tarjetas disponibles para estudiar.`:'Crea una tarjeta o importa tu próximo mazo.'}</p>
         ${button(s.dueToday?'Empezar a estudiar':'Crear una tarjeta',s.dueToday?'study':'new-card',s.dueToday?'arrow':'plus','btn-primary')}
       </div>
@@ -496,8 +644,7 @@ function dashboard(){
       </div>
     </section>
   </div>
-  ${statsStrip()}
-  <section>
+  <section class="library-section">
     ${activeFolder && folderDeck ? `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;background:var(--panel);padding:14px 20px;border-radius:12px;border:1px solid var(--line);box-shadow:var(--shadow);flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:12px">
@@ -508,6 +655,7 @@ function dashboard(){
           </div>
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${button('Renombrar carpeta','rename-deck','edit','',`data-id="${folderDeck.id}"`)}
           ${button('Añadir libro a esta carpeta','new-book-in-folder','plus','btn-primary',`data-folder="${esc(folderDeck.name)}"`)}
           ${button('Estudiar carpeta completa','study','arrow','btn-dark',`data-id="${folderDeck.id}"`)}
         </div>
@@ -515,11 +663,11 @@ function dashboard(){
     ` : ''}
     <div class="section-header">
       <div class="section-title">
-        <h2>${activeFolder ? 'Libros en esta carpeta' : 'Mis carpetas y mazos'}</h2>
+        <h2>${activeFolder ? 'Libros en esta carpeta' : 'Tu biblioteca'}</h2>
         <span class="count">${decks.length}</span>
       </div>
       <div class="section-actions">
-        ${!activeFolder ? `<button class="btn btn-quiet" data-action="new-folder" style="font-size:12px;padding:6px 10px">${icon('folder')} + Nueva carpeta</button>` : ''}
+
         <select id="deck-sort" class="sort-select" aria-label="Ordenar mazos">
           <option value="recent" ${sort==='recent'?'selected':''}>Orden de creación</option>
           <option value="name" ${sort==='name'?'selected':''}>Nombre A–Z</option>
@@ -537,11 +685,8 @@ function dashboard(){
     <div class="deck-grid ${layout==='list'?'list-view':''}">
       ${decks.map(d=>deckCard(d,data.decks.indexOf(d))).join('')}
       ${decks.length===0&&(search||filter!=='all')?empty('No hay mazos aquí','Prueba con otro nombre o cambia el filtro.','clear-search','Ver todos los mazos','search'):''}
-      <button class="new-deck-card" data-action="new-folder">
-        <span class="plus-circle">${icon('folder')}</span>
-        <strong>Organizar en carpetas</strong>
-        <span>Crea una carpeta para agrupar tus libros</span>
-      </button>
+      ${decks.length===0&&!search&&filter==='all'?empty('Tu siguiente idea empieza aquí','Crea un mazo o importa tus tarjetas para empezar.','new-deck','Crear mi primer mazo'):''}
+
     </div>
   </section>`;
 }
@@ -557,11 +702,11 @@ function deckCard(d,i){
   return `<article class="deck-card ${isFolder?'folder-card':''}" style="--deck-bg:${bg};--deck-color:${color}">
     <div class="deck-top">
       <span class="deck-icon">${icon(isFolder ? 'folder' : ic)}</span>
-      <div style="display:flex;gap:4px;align-items:center">
-        ${!isFolder ? `<button class="icon-button" data-action="deck-config" data-id="${d.id}" title="Plan de estudio (Límites de repasos y nuevas)" aria-label="Ajustes de estudio">${icon('settings')}</button>` : ''}
-        ${!isFolder ? `<button class="icon-button" data-action="move-deck-modal" data-id="${d.id}" title="Mover libro a una carpeta" aria-label="Mover a carpeta">${icon('folder')}</button>` : ''}
-        <button class="icon-button" data-action="${isFolder ? 'open-folder' : 'open-deck'}" data-id="${d.id}" aria-label="Abrir ${esc(displayName)}">${icon('chevron')}</button>
-      </div>
+      <details class="deck-options"><summary class="icon-button" aria-label="Opciones de ${esc(displayName)}">${icon('settings')}</summary><div class="deck-options-panel">
+${!isFolder ? button('Plan de estudio','deck-config','settings','',`data-id="${d.id}"`) + button('Mover a carpeta','move-deck-modal','folder','',`data-id="${d.id}"`) : ''}
+${button('Renombrar '+(isFolder?'carpeta':'mazo'),'rename-deck','edit','',`data-id="${d.id}"`)}
+${button('Abrir '+(isFolder?'carpeta':'mazo'),isFolder?'open-folder':'open-deck','chevron','',`data-id="${d.id}"`)}
+</div></details>
     </div>
     <div>
       <div class="deck-category">${isFolder ? `<span class="folder-badge">${icon('folder')} CARPETA · ${childCount} LIBROS</span>` : (d.name.includes('Demo')||d.name.includes('ejemplo')?'MAZO DE EJEMPLO':'LIBRO / MAZO')}</div>
@@ -577,7 +722,7 @@ function deckCard(d,i){
     <div class="deck-progress">
       <div class="deck-progress-label">
         <span><strong>${num(d.learned||0)}</strong> repasadas (${mastered}%)</span>
-        <span>${num(d.total - (d.learned||0))} pendientes</span>
+
       </div>
       <div class="progress"><span style="width:${mastered}%"></span></div>
     </div>
@@ -610,6 +755,7 @@ function cardsView(favorites=false){
   return `${heading(favorites?'Lo que quieres tener a mano.':deck?esc(deck.name):'Cada tarjeta, una idea.',favorites?'Tus tarjetas favoritas, reunidas en un solo lugar.':`${num(browsePage.total)} tarjetas${selectedDeck?' en este mazo':' en tu biblioteca'}.`,(selectedDeck?button('Todos los mazos','back-decks','back'):'')+button('Crear tarjeta','new-card','plus','btn-primary'))}
   ${selectedDeck?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;align-items:center">
     ${button('Estudiar este mazo','study','arrow','btn-dark',`data-id="${selectedDeck}"`)}
+    ${button('Renombrar mazo','rename-deck','edit','',`data-id="${selectedDeck}"`)}
     ${button('Mover a carpeta','move-deck-modal','folder','',`data-id="${selectedDeck}"`)}
     ${button('Exportar mazo .apkg','export-deck','download','',`data-id="${selectedDeck}"`)}
     ${button('Eliminar mazo','delete-deck','trash','btn-quiet',`data-id="${selectedDeck}"`)}
@@ -1404,6 +1550,7 @@ function syncView(){
   const syncMgr = window.LumcardsSync;
   const fbUser = syncMgr?.firebase?.getUser();
   const driveUser = syncMgr?.drive?.getUser();
+  const chosenDest = syncMgr?.getStorageDestination ? syncMgr.getStorageDestination() : (localStorage.getItem('lumcards_storage_destination') || 'device');
 
   return `
   <div class="sync-container">
@@ -1418,6 +1565,46 @@ function syncView(){
         <span>Tarjetas listas</span>
       </div>
     </div>
+
+    <!-- SELECTOR DE DESTINO PREFERIDO DE ALMACENAMIENTO -->
+    <section class="sync-card" style="margin-bottom: 24px; border: 2px solid var(--primary, #6366f1); background: var(--panel);">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+        <span style="font-size:26px">📍</span>
+        <div>
+          <h2 style="font-size:18px;margin:0;font-weight:800;color:var(--text)">¿Dónde prefieres guardar tu estudio y tus libros?</h2>
+          <p style="margin:3px 0 0;font-size:13px;color:var(--muted)">Tú tienes el control total. Elige tu destino predeterminado con un solo clic:</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px">
+        <div class="storage-choice-card ${chosenDest === 'device' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="device">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">📱</span>
+            <span class="badge ${chosenDest === 'device' ? 'badge-active' : ''}">${chosenDest === 'device' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">En este Dispositivo</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">100% Privado y Offline. No requiere cuentas ni internet. Se guarda en la memoria interna de tu equipo.</p>
+        </div>
+
+        <div class="storage-choice-card ${chosenDest === 'firebase' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="firebase">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">☁️</span>
+            <span class="badge ${chosenDest === 'firebase' ? 'badge-active' : ''}">${chosenDest === 'firebase' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Nube Lumcards</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">Sincronización instantánea con tu correo. Mantiene tus rachas, repasos y metas al día en todos tus dispositivos.</p>
+        </div>
+
+        <div class="storage-choice-card ${chosenDest === 'gdrive' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="gdrive">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:24px">📁</span>
+            <span class="badge ${chosenDest === 'gdrive' ? 'badge-active' : ''}">${chosenDest === 'gdrive' ? '✓ Activo' : 'Elegir'}</span>
+          </div>
+          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Tu Google Drive</strong>
+          <p style="font-size:12px;color:var(--muted);margin:0">Tus 15 GB gratuitos de Google para libros grandes, fotos HD y audios. Sin depender de servidores de terceros.</p>
+        </div>
+      </div>
+    </section>
 
     <div class="sync-sovereign-banner">
       ${icon('shield')}
@@ -1564,7 +1751,25 @@ function syncView(){
 }
 
 function firebaseLoginModal(){
-  showModal('Cuenta en la Nube · Firebase', 'Inicia sesión o regístrate para sincronizar tu progreso y rachas en tiempo real.', `
+  showModal('Cuenta en la Nube · Google y Firebase', 'Inicia sesión con tu cuenta de Google para sincronizar tus mazos, tarjetas y progreso en todos tus dispositivos.', `
+    <div style="margin-bottom:16px">
+      <button type="button" class="btn" id="fb-google-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 18px;font-weight:600;font-size:15px;border-radius:10px;border:1px solid #dadce0;background:#ffffff;color:#3c4043;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.1);transition:all 0.2s ease" data-action="firebase-google-login">
+        <svg width="20" height="20" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"/>
+          <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.35 24 12 24Z"/>
+          <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.16 0 9.94 0 12s.45 3.84 1.25 5.42l4.03-3.15Z"/>
+          <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z"/>
+        </svg>
+        <span>Continuar con mi cuenta de Google</span>
+      </button>
+    </div>
+
+    <div style="display:flex;align-items:center;text-align:center;margin:16px 0;color:var(--muted);font-size:13px">
+      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
+      <span style="padding:0 12px">o con correo y contraseña</span>
+      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
+    </div>
+
     <form id="firebase-auth-form">
       <div style="display:flex;gap:10px;margin-bottom:14px">
         <button type="button" class="btn btn-primary" id="fb-mode-login-btn" style="flex:1" onclick="window.setFbAuthMode('login')">Iniciar Sesión</button>
@@ -1584,6 +1789,11 @@ function firebaseLoginModal(){
       </label>
       <div class="info-box" id="fb-auth-info">
         Tus sesiones de estudio, rachas diarias y estadísticas se sincronizarán al instante entre todos tus dispositivos.
+      </div>
+      <div style="margin:12px 0;text-align:center">
+        <button type="button" class="btn btn-quiet" style="width:100%" data-action="firebase-guest-login">
+          ${icon('globe')} Continuar como Invitado (Modo local sin contraseña)
+        </button>
       </div>
       <div class="form-error" role="alert"></div>
       <div class="form-footer">
@@ -1616,18 +1826,20 @@ window.setFbAuthMode = function(mode){
 };
 
 function driveConnectModal(){
-  showModal('Vincular tu Google Drive Personal', 'Guarda tus libros con fotos y audios en tus 15 GB gratuitos de Google Drive.', `
+  const curEmail = window.LumcardsSync?.drive?.getUser()?.email || '';
+  showModal('Vincular tu Google Drive', 'Guarda tus libros con fotos y audios en tus 15 GB gratuitos de Google Drive.', `
     <form id="drive-auth-form">
       <div class="info-box">
         <strong>15 GB Gratuitos · Cero Costos de Servidor:</strong><br>
         Tus archivos se guardan directamente en tu cuenta privada de Google en la carpeta segura <strong>«Lumcards Mazos y Estudio»</strong>. Nadie más tiene acceso a tus datos ni a tus libros.
       </div>
-      <label class="field">Tu correo o nombre de cuenta Google
-        <input type="email" name="email" id="drive-auth-email" placeholder="usuario@gmail.com" required autofocus>
+      <label class="field">Tu cuenta o correo de Google
+        <input type="email" name="email" id="drive-auth-email" placeholder="usuario@gmail.com" value="${esc(curEmail)}" required autofocus>
       </label>
-      <label class="field">Google OAuth Client ID (Opcional si usas tu propia API Key)
-        <input type="text" name="clientId" id="drive-auth-client-id" placeholder="apps.googleusercontent.com (opcional)">
-      </label>
+      <div class="info-box" style="background:rgba(99,102,241,0.06);border-color:rgba(99,102,241,0.2);margin-top:10px">
+        💡 <strong>Sin configuraciones complejas ni llaves API:</strong><br>
+        No necesitas crear proyectos en Google Cloud ni buscar Client IDs. Lumcards vincula tu cuenta directamente y te permite respaldar y restaurar tus libros y tarjetas de forma transparente.
+      </div>
       <div class="form-error" role="alert"></div>
       <div class="form-footer">
         ${button('Cancelar', 'close-modal')}
@@ -1732,7 +1944,7 @@ function studyView(){
 
   return `<section class="study-surface study-fullscreen"><div class="anki-topbar"><div style="display:flex;gap:10px;align-items:center;min-width:0"><button class="anki-side-action" data-action="${isExamSession?'exit-study':'back-decks'}" title="Volver a los mazos (Esc)">${icon('back')}<span>Mazos</span></button><h2 title="${esc(d?.name||'Mazo')}">${isExamSession ? 'Modo Examen · ' + esc(d?.name||'Biblioteca') : esc(d?.name||'4000 Essential English Words')}</h2></div>${centerTopHeader}<div style="display:flex;gap:8px;align-items:center"><button class="icon-button" data-action="replay-audio" aria-label="Repetir audio" title="Repetir audio (R)" style="color:#94a3b8"><svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button><button class="icon-button" data-action="edit-card" data-id="${c.id}" aria-label="Editar tarjeta" title="Editar tarjeta (E)" style="color:#38bdf8">${icon('edit')}</button><button class="icon-button ${c.starred?'starred':''}" data-action="star" data-id="${c.id}" aria-label="Marcar como favorita" title="Marcar como favorita (S)" style="color:#94a3b8">${icon('star')}</button><button class="icon-button" data-action="toggle-fullscreen" aria-label="${isFullscreen?'Salir de pantalla completa':'Pantalla completa'}" title="Pantalla completa (F)" style="color:#94a3b8">${icon(isFullscreen?'shrink':'expand')}</button></div></div><div class="anki-card-container"><iframe class="anki-card-frame" id="study-frame" title="${revealed?'Respuesta':'Pregunta'} de la tarjeta" sandbox="allow-scripts allow-same-origin" allow="autoplay" referrerpolicy="no-referrer"></iframe></div><div class="anki-bottom-bar"><div style="display:flex;gap:8px;align-items:center"><button class="anki-side-action" data-action="edit-card" data-id="${c.id}" title="Editar tarjeta (E)" style="border-color:#0284c7;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">${icon('edit')}<span>Editar (E)</span></button></div><div class="anki-study-center">${c.renderError?`<div style="display:flex;gap:10px;align-items:center"><button class="anki-side-action" data-action="skip-card">Omitir por hoy</button></div>`:revealed?`<div class="anki-rating-grid">${(isExamSession ? ['Fallo', 'Difícil', 'Bien', 'Fácil'] : ['Otra vez','Difícil','Bien','Fácil']).map((label,i)=>`<div class="anki-rate-col"><span class="anki-interval">${esc(intervals[i]||['<1m','<6m','<10m','3d'][i])}</span><button class="anki-rate-button rate-col-${i+1}" data-action="rate" data-rating="${i+1}" ${busy?'disabled':''}><span class="rate-name">${label}</span><kbd>${i+1}</kbd></button></div>`).join('')}</div>`:`<button class="anki-btn-show" data-action="reveal" id="btn-reveal-answer"><span>Mostrar respuesta</span><kbd>Espacio</kbd></button>`}</div><div style="display:flex;gap:8px;align-items:center"><button class="anki-side-action" data-action="replay-audio" title="Repetir audio (R)"><svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> Audio (R)</button></div></div></section>`;
 }
-function render(){document.body.classList.toggle('in-study',view==='study');const focused=$('#global-search')===document.activeElement,pos=$('#global-search')?.selectionStart;app.innerHTML=view==='study'?studyView():shell(view==='decks'?dashboard():view==='cards'?cardsView():view==='favorites'?cardsView(true):view==='stats'?statistics():view==='backups'?backupsView():view==='sync'?syncView():settingsView());if(view==='study'&&currentCard()){const c=currentCard();mountCard($('#study-frame'),c,revealed);const stateKey=`${c.id}_${revealed?'ans':'que'}`;if(lastPlayedKey!==stateKey){lastPlayedKey=stateKey;const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios&&audios.length>0){AudioController.playList(audios);}else{AudioController.stop();}}}else{lastPlayedKey=null;AudioController.stop();}if(focused&&$('#global-search')){try{$('#global-search').focus();$('#global-search').setSelectionRange(pos,pos);}catch{}}}
+function render(){document.body.classList.remove('menu-open');document.body.classList.toggle('in-study',view==='study');const focused=$('#global-search')===document.activeElement,pos=$('#global-search')?.selectionStart;app.innerHTML=view==='study'?studyView():shell(view==='decks'?dashboard():view==='cards'?cardsView():view==='favorites'?cardsView(true):view==='stats'?statistics():view==='backups'?backupsView():view==='sync'?syncView():settingsView());if(view==='study'&&currentCard()){const c=currentCard();mountCard($('#study-frame'),c,revealed);const stateKey=`${c.id}_${revealed?'ans':'que'}`;if(lastPlayedKey!==stateKey){lastPlayedKey=stateKey;const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios&&audios.length>0){AudioController.playList(audios);}else{AudioController.stop();}}}else{lastPlayedKey=null;AudioController.stop();}if(focused&&$('#global-search')){try{$('#global-search').focus();$('#global-search').setSelectionRange(pos,pos);}catch{}}}
 
 function safeCardHTML(html){const template=document.createElement('template');template.innerHTML=html||'';const doc=template.content;doc.querySelectorAll('script,iframe,object,embed,form,input,button,textarea,select,base,link,meta').forEach(e=>e.remove());doc.querySelectorAll('audio').forEach(audio=>{let src=audio.getAttribute('src');if(!src){const source=audio.querySelector('source');if(source)src=source.getAttribute('src');}if(!src)return;try{const u=new URL(src,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))src=u.href;}catch{}const btn=document.createElement('button');btn.type='button';btn.className='anki-audio-pill';btn.setAttribute('data-src',src);btn.setAttribute('aria-label','Reproducir audio');btn.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> <span>Audio</span>';audio.replaceWith(btn);});doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]){if(/^on/i.test(a.name)||['srcdoc','action','formaction','srcset','autoplay'].includes(a.name))el.removeAttribute(a.name);if(['href','xlink:href'].includes(a.name)&&!a.value.startsWith('#')){if(el.namespaceURI==='http://www.w3.org/2000/svg'&&el.localName==='image'){try{const u=new URL(a.value,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))el.setAttribute(a.name,u.href);else el.removeAttribute(a.name);}catch{el.removeAttribute(a.name);}}else el.removeAttribute(a.name);}if(['src','poster'].includes(a.name)){if(/^(data:(image|audio)\/)/i.test(a.value))continue;try{const url=new URL(a.value,location.origin+'/media/');if(url.origin!==location.origin||!url.pathname.startsWith('/media/'))el.removeAttribute(a.name);else el.setAttribute(a.name,url.href);}catch{el.removeAttribute(a.name);}}}});if(typeof window.renderMathInElement==='function'){window.renderMathInElement(template.content,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false},{left:'$$',right:'$$',display:true}],throwOnError:false,trust:false,maxExpand:1000,maxSize:20,strict:'ignore'});}return template.innerHTML;}
 const CARD_THEMES = {
@@ -1749,7 +1961,7 @@ function getCardCustomStyle() {
     const saved = localStorage.getItem('lumcards-card-style');
     if (saved) return JSON.parse(saved);
   } catch {}
-  return { theme: 'quizlet', font: 'sans', size: '22px', align: 'center', cloze: '#818cf8' };
+  return { theme: 'clean', font: 'sans', size: '22px', align: 'center', cloze: '#6558d9' };
 }
 
 function mountCard(frame,card,answer=false){
@@ -1774,7 +1986,8 @@ function mountCard(frame,card,answer=false){
 function showModal(title,intro,content){modal.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Cerrar">${icon('close')}</button></div><p class="dialog-intro">${intro}</p>${content}`;if(!modal.open)modal.showModal();}
 function newDeck(){showModal('Un nuevo espacio para aprender.','Elige un nombre que te ayude a encontrar tus tarjetas.',`<form id="deck-form"><label class="field">Nombre del mazo<input name="name" placeholder="Por ejemplo: Inglés para viajar" required maxlength="120" autofocus></label><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('plus')}Crear mazo</button></div></form>`);}
 function newFolderModal(){showModal('Nueva carpeta para organizar libros','Crea una carpeta contenedora para agrupar varios libros o submazos en un solo lugar.',`<form id="folder-form"><label class="field">Nombre de la carpeta<input name="name" placeholder="Por ejemplo: 4000 Essential English Words" required maxlength="120" autofocus></label><div class="info-box">Dentro de esta carpeta podrás colocar libros (por ej. <strong>1.Book</strong>, <strong>2.Book</strong>...) o mover libros ya creados para mantener tu pantalla ordenada.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('folder')}Crear carpeta</button></div></form>`);}
-function moveDeckModal(deckId){const d=data.decks.find(x=>String(x.id)===String(deckId));if(!d)return;const folders=data.decks.filter(x=>String(x.id)!==String(d.id));showModal('Mover libro a una carpeta',`Organiza «${esc(d.name)}» dentro de una carpeta contenedora.`,`<form id="move-deck-form" data-id="${d.id}"><label class="field">Carpeta de destino<select name="parentId"><option value="root">Ninguna (Dejar como mazo suelto en la raíz)</option>${folders.map(f=>`<option value="${f.id}" ${f.name===d.parentName?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}</select></label><div class="info-box">Al colocar el libro dentro de una carpeta, se agrupará en la pantalla principal para que no tengas libros dispersos.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('check')}Mover libro</button></div></form>`);}
+function renameDeckModal(deckId){const d=data.decks.find(x=>String(x.id)===String(deckId));if(!d)return;const kind=d.isFolder?'carpeta':'mazo';showModal('Renombrar '+kind,`Cambia el nombre de «${esc(d.shortName||d.name)}».`,`<form id="rename-deck-form" data-id="${d.id}" data-kind="${kind}"><label class="field">Nuevo nombre<input name="name" value="${esc(d.shortName||d.name)}" required maxlength="120" autofocus></label><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('edit')}Guardar nombre</button></div></form>`);}
+function moveDeckModal(deckId){const d=data.decks.find(x=>String(x.id)===String(deckId));if(!d)return;const folders=data.decks.filter(x=>x.isFolder&&!x.parentName&&String(x.id)!==String(d.id));showModal('Mover libro a una carpeta',`Organiza «${esc(d.shortName||d.name)}» dentro de una carpeta contenedora.`,`<form id="move-deck-form" data-id="${d.id}"><label class="field">Carpeta de destino<select name="parentId"><option value="root">Ninguna (Dejar como mazo suelto en la raíz)</option>${folders.map(f=>`<option value="${f.id}" ${f.name===d.parentName?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}</select></label><div class="info-box">Al colocar el libro dentro de una carpeta, se agrupará en la pantalla principal para que no tengas libros dispersos.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('check')}Mover libro</button></div></form>`);}
 function newBookInFolderModal(folderName){showModal('Añadir libro a '+esc(folderName),'Crea un nuevo libro o submazo directamente dentro de esta carpeta.',`<form id="new-book-form" data-folder="${esc(folderName)}"><label class="field">Nombre del libro<input name="bookName" placeholder="Por ejemplo: 1.Book, Unidad 1, Lección A..." required maxlength="100" autofocus></label><div class="info-box">El libro se creará automáticamente dentro de <strong>${esc(folderName)}</strong>.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('plus')}Crear libro en carpeta</button></div></form>`);}
 
 function examModal(preselectedDeckId){
@@ -1862,13 +2075,8 @@ async function startExam(deckId, mode, limit, alterScheduler = false){
     revealed = false;
     search = '';
     lastPlayedKey = null;
-    isFullscreen = true;
+    isFullscreen = !!document.fullscreenElement;
     modal.close();
-    try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-      }
-    } catch {}
     render();
   } catch (err) {
     toast(err.message, true);
@@ -1892,7 +2100,7 @@ function updateEditorKind(){const form=$('#card-form'),kind=$('#note-kind')?.val
 
 function importModal(){showModal('Tus mazos, como en casa.','Trae tu biblioteca de Anki y empieza a estudiar aquí.',`<a class="btn" href="/practice.html#import" style="margin-bottom:18px">Importar CSV, TSV, TXT o JSON</a><div class="drop-zone" id="drop-zone" role="button" tabindex="0" data-action="pick-file">${icon('upload')}<strong>Arrastra tu archivo aquí</strong><p>o haz clic para elegirlo<br>.apkg · .colpkg · .anki2 · hasta 500 MB</p></div><div class="info-box">Se importan tarjetas, plantillas y archivos multimedia incluidos. Antes de importar, guardamos una copia de tu colección. Las notas repetidas se combinan con el importador de Anki.</div><p class="small muted">Los mazos con complementos o JavaScript propio pueden necesitar ajustes. Para traer imágenes y audio, usa .apkg o .colpkg.</p><div id="import-status" class="form-error" role="status"></div>`);const zone=$('#drop-zone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragging');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragging'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragging');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0]);});zone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#import-file').click();}});}
 async function uploadFile(file){if(busy)return;if(!/\.(apkg|colpkg|anki2)$/i.test(file.name)){toast('Elige un archivo .apkg, .colpkg o .anki2.',true);return;}if(file.size>500*1024*1024){toast('El archivo supera el límite de 500 MB.',true);return;}loading(true);const status=$('#import-status');if(status){status.className='small muted';status.textContent='Importando '+file.name+'… Mantén la app abierta.';}try{const res=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Anki-Request':'1'},body:file});const result=await res.json();if(!res.ok)throw new Error(result.error||'No se pudo importar el archivo.');await refresh(false);modal.close();view='decks';search='';filter='all';render();toast(result.message||'Mazo importado. Tu biblioteca está lista.');}catch(e){if(status){status.className='form-error';status.textContent=e.message;}toast(e.message,true);}finally{loading(false);$('#import-file').value='';}}
-async function startStudy(id){AudioController.unlock();loading(true);try{isExamSession=false;examConfig=null;selectedDeck=id||null;reviewSession=await api('study',{deckId:id||null});view='study';sessionCount=0;sessionStarted=Date.now();revealed=false;search='';lastPlayedKey=null;isFullscreen=true;try{if(!document.fullscreenElement&&document.documentElement.requestFullscreen){await document.documentElement.requestFullscreen();}}catch{}render();}finally{loading(false);}}
+async function startStudy(id){AudioController.unlock();loading(true);try{isExamSession=false;examConfig=null;selectedDeck=id||null;reviewSession=await api('study',{deckId:id||null});view='study';sessionCount=0;sessionStarted=Date.now();revealed=false;search='';lastPlayedKey=null;isFullscreen=!!document.fullscreenElement;render();}finally{loading(false);}}
 async function rate(rating){
   if(busy||!revealed||!currentCard()||currentCard().renderError)return;
   AudioController.unlock();
@@ -2245,7 +2453,9 @@ document.addEventListener('click', async e => {
   const a = el.dataset.action, id = el.dataset.id;
   try {
     if (a === 'nav') await navigate(el.dataset.view || 'cards');
-    else if (a === 'menu') $('.sidebar').classList.toggle('open');
+    else if (a === 'menu') setMobileMenu(true);
+    else if (a === 'close-menu') setMobileMenu(false);
+    else if (a === 'study-tools') studyTools();
     else if (a === 'theme') {
       theme = theme === 'dark' ? 'light' : 'dark';
       localStorage.setItem('anki2-theme', theme);
@@ -2270,6 +2480,7 @@ document.addEventListener('click', async e => {
     else if (a === 'attach-media') $('#attach-file').click();
     else if (a === 'new-deck') newDeck();
     else if (a === 'new-folder') newFolderModal();
+    else if (a === 'rename-deck') renameDeckModal(id);
     else if (a === 'open-folder') { activeFolder = id; render(); }
     else if (a === 'exit-folder') { activeFolder = null; render(); }
     else if (a === 'move-deck-modal') moveDeckModal(id);
@@ -2324,29 +2535,71 @@ document.addEventListener('click', async e => {
       if (url) window.open(url, '_blank');
     }
     else if (a === 'firebase-login-modal') firebaseLoginModal();
+    else if (a === 'firebase-google-login') {
+      loading(true);
+      try {
+        const res = await window.LumcardsSync?.firebase?.signInWithGoogle();
+        if (res && res.needsProviderEnable) {
+          showModal('Habilitar Proveedor Google en Firebase', 'Falta activar el botón de Google en tu consola de Firebase.', `
+            <div class="info-box" style="margin-bottom:14px">
+              <strong>Paso único para activar Google Sign-In:</strong><br>
+              En la consola de Firebase sólo debes activar el interruptor de <strong>Google</strong>.<br><br>
+              👉 <a href="${res.consoleUrl}" target="_blank" style="color:var(--primary);font-weight:700;text-decoration:underline">Abrir Consola de Firebase · Proveedores</a>
+            </div>
+            <div style="margin-top:16px;text-align:right">
+              ${button('Entendido, ya lo activo', 'close-modal', 'check', 'btn-primary')}
+            </div>
+          `);
+          return;
+        }
+        modal.close();
+        toast(`¡Bienvenido! Sesión iniciada con Google (${res.user.email})`);
+        await syncFromCloudIfAvailable();
+        await refresh();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        loading(false);
+      }
+    }
     else if (a === 'firebase-logout') {
-      window.LumcardsSync?.firebase?.signOut();
+      await window.LumcardsSync?.firebase?.signOut();
       render();
       toast('Sesión cerrada en Firebase.');
     }
     else if (a === 'firebase-sync-now') {
       loading(true);
       try {
-        const stats = {
-          totalCards: data.cards?.length || 0,
-          totalDecks: data.decks?.length || 0,
-          streak: data.streak || 0,
-          dailyGoal: data.settings?.dailyGoal || 20,
-          lastSync: new Date().toISOString()
-        };
-        await window.LumcardsSync?.firebase?.saveProgress(stats);
-        toast('¡Progreso y rachas sincronizados con Firebase con éxito!');
+        const store = getWebData();
+        const res = await window.LumcardsSync?.firebase?.syncFullWorkspace(store);
+        if (res && res.success) {
+          toast('¡Todo tu espacio de estudio, libros y tarjetas están sincronizados en la nube!');
+        } else {
+          toast(res?.error || 'Sincronización guardada localmente.', !res?.success);
+        }
       } catch(err) {
         toast(err.message, true);
       } finally {
         loading(false);
         render();
       }
+    }
+    else if (a === 'set-storage-dest') {
+      const dest = el.dataset.dest || 'device';
+      window.LumcardsSync?.setStorageDestination(dest);
+      const labels = {
+        device: 'Almacenamiento Local en este Dispositivo',
+        firebase: 'Nube Lumcards (Sincronización con cuenta)',
+        gdrive: 'Google Drive Personal (15 GB para libros)'
+      };
+      toast(`Destino activo: ${labels[dest] || dest}`);
+      render();
+    }
+    else if (a === 'firebase-guest-login') {
+      window.LumcardsSync?.firebase?.continueAsGuest();
+      modal.close();
+      toast('¡Has ingresado como Estudiante Invitado!');
+      render();
     }
     else if (a === 'drive-connect') driveConnectModal();
     else if (a === 'drive-disconnect') {
@@ -2357,13 +2610,24 @@ document.addEventListener('click', async e => {
     else if (a === 'drive-backup-now') {
       loading(true);
       try {
-        const res = await fetch('/api/sync/export');
-        if (!res.ok) throw new Error('No se pudo generar el archivo de exportación');
-        const blob = await res.blob();
+        let blob;
+        if (isWebMode) {
+          const store = getWebData();
+          const jsonStr = JSON.stringify(store, null, 2);
+          blob = new Blob([jsonStr], { type: 'application/json' });
+        } else {
+          const res = await fetch('/api/sync/export');
+          if (!res.ok) throw new Error('No se pudo generar el archivo de exportación');
+          blob = await res.blob();
+        }
         const now = new Date().toISOString().slice(0, 10);
         const filename = `lumcards_backup_${now}.colpkg`;
-        await window.LumcardsSync?.drive?.uploadDeck(blob, filename);
-        toast(`¡Copia guardada en tu Google Drive! (${filename})`);
+        const resUpload = await window.LumcardsSync?.drive?.uploadDeck(blob, filename);
+        if (resUpload?.downloaded) {
+          toast(`¡Respaldo descargado y registrado para tu Drive! (${filename})`);
+        } else {
+          toast(`¡Copia guardada en tu Google Drive! (${filename})`);
+        }
       } catch(err) {
         toast('Error al respaldar en Drive: ' + err.message, true);
       } finally {
@@ -2532,8 +2796,9 @@ document.addEventListener('change',async e=>{
   if(e.target.name==='ret-type'){statsRetentionType=e.target.value;render();}
 });
 $('#import-file').addEventListener('change',e=>{if(e.target.files[0])uploadFile(e.target.files[0]);});
-document.addEventListener('submit',async e=>{const form=e.target;if(!['deck-form','folder-form','move-deck-form','new-book-form','card-form','settings-form','goal-form','template-form','exam-form','deck-config-form','convert-notes-form','image-occlusion-form','p2p-sync-form','firebase-auth-form','drive-auth-form'].includes(form.id))return;e.preventDefault();if(busy)return;loading(true);const values=Object.fromEntries(new FormData(form));try{if(form.id==='deck-form'){const result=await api('decks',{name:values.name});modal.close();await refresh();toast('Mazo creado. Añade tu primera tarjeta.');selectedDeck=result.id;await cardForm();}
-else if(form.id==='folder-form'){const result=await api('decks',{name:values.name});modal.close();await refresh();toast('Carpeta «'+values.name+'» creada.');activeFolder=result.id;render();}
+document.addEventListener('submit',async e=>{const form=e.target;if(!['deck-form','folder-form','rename-deck-form','move-deck-form','new-book-form','card-form','settings-form','goal-form','template-form','exam-form','deck-config-form','convert-notes-form','image-occlusion-form','p2p-sync-form','firebase-auth-form','drive-auth-form'].includes(form.id))return;e.preventDefault();if(busy)return;loading(true);const values=Object.fromEntries(new FormData(form));try{if(form.id==='deck-form'){const result=await api('decks',{name:values.name});modal.close();await refresh();toast('Mazo creado. Añade tu primera tarjeta.');selectedDeck=result.id;await cardForm();}
+else if(form.id==='folder-form'){const result=await api('folders',{name:values.name});modal.close();await refresh();toast('Carpeta «'+values.name+'» creada.');activeFolder=result.id;render();}
+else if(form.id==='rename-deck-form'){const kind=form.dataset.kind;await api('decks/rename',{id:form.dataset.id,name:values.name});modal.close();await refresh();toast((kind==='carpeta'?'Carpeta':'Mazo')+' renombrado correctamente.');}
 else if(form.id==='move-deck-form'){const deckId=form.dataset.id;const parentId=values.parentId==='root'?0:values.parentId;await api('decks/move',{deckId,parentId});modal.close();await refresh();toast('Libro organizado en la carpeta.');}
 else if(form.id==='new-book-form'){const folderName=form.dataset.folder;const fullName=folderName+'::'+values.bookName.trim();const result=await api('decks',{name:fullName});modal.close();await refresh();toast('Libro «'+values.bookName+'» creado en la carpeta.');selectedDeck=result.id;await cardForm();}
 else if(form.id==='card-form'){const isEdit=!!form.dataset.id;const result=await api(isEdit?'cards/edit':'cards',isEdit?{id:form.dataset.id,fields:Array.from({length:Number(form.dataset.fields)},(_,i)=>values['field_'+i]||''),tags:values.tags}:{...values,deckId:values.deckId||selectedDeck});if(!isEdit)localStorage.removeItem('anki2-draft');modal.close();if(view==='study'&&currentCard()&&String(currentCard().id)===String(form.dataset.id)){try{const freshCard=await api('cards/'+encodeURIComponent(form.dataset.id));if(freshCard&&reviewSession?.cards?.length){reviewSession.cards[0]=freshCard;lastPlayedKey=null;}}catch{}}await refresh();toast(result.warnings?.length?result.warnings.join(' '):'Tarjeta guardada y actualizada.');}
@@ -2602,14 +2867,23 @@ else if(form.id==='firebase-auth-form'){
   const isRegister = values.authMode === 'register';
   const name = values.displayName?.trim() || email.split('@')[0];
   if (isRegister) {
-    await window.LumcardsSync?.firebase?.register(email, pass, name);
-    toast('¡Cuenta de Firebase creada con éxito!');
+    const res = await window.LumcardsSync?.firebase?.register(email, pass, name);
+    if (res?.notice === 'offline_auth_fallback') {
+      toast('Sesión iniciada en modo local. Recuerda activar Correo/Contraseña en la consola de Firebase.');
+    } else {
+      toast('¡Cuenta de Firebase creada con éxito!');
+    }
   } else {
-    await window.LumcardsSync?.firebase?.signIn(email, pass);
-    toast('¡Sesión iniciada en Firebase!');
+    const res = await window.LumcardsSync?.firebase?.signIn(email, pass);
+    if (res?.notice === 'offline_auth_fallback') {
+      toast('Sesión iniciada en modo local. Recuerda activar Correo/Contraseña en la consola de Firebase.');
+    } else {
+      toast('¡Sesión iniciada en Firebase!');
+    }
   }
   modal.close();
-  render();
+  await syncFromCloudIfAvailable();
+  await refresh();
 }
 else if(form.id==='drive-auth-form'){
   const email = values.email?.trim();
@@ -2629,11 +2903,18 @@ window.addEventListener('message',e=>{AudioController.unlock();if(e.data){if(e.d
 modal.addEventListener('click',e=>{if(e.target===modal){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close();}});
 async function boot(){
   try{
+    if (window.LumcardsSync) {
+      window.LumcardsSync.init();
+      await syncFromCloudIfAvailable();
+    }
     await refresh();
   }catch(error){
     console.warn('Conmutando a Modo Web Cloud:', error);
     isWebMode = true;
     try {
+      if (window.LumcardsSync) {
+        await syncFromCloudIfAvailable();
+      }
       await refresh();
       toast('Modo Web Cloud activado · Tarjetas guardadas en este navegador');
     } catch(err2) {

@@ -1,5 +1,7 @@
 # Lumcards — Tu espacio personal de aprendizaje y memorización
 
+> Memoria del proyecto: abre `D:\CODEX` como vault de Obsidian y comienza por [[brain/00_HOME|Cerebro de Lumcards]]. Codex usa [AGENTS.md](AGENTS.md) para leer solo el contexto necesario y mantener el estado actualizado.
+
 **Lumcards** es una aplicación moderna e independiente de estudio, tarjetas de memoria y juegos de repaso interactivo para Windows. Ofrece interoperabilidad técnica con paquetes `.apkg`/`.colpkg` y exportaciones de texto/Quizlet, incorporando una experiencia de usuario de nueva generación con aceleración por hardware (Microsoft WebView2), modos de juego estilo Quizlet y almacenamiento local privado.
 
 ---
