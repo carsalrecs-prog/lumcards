@@ -10,7 +10,7 @@ updated: 2026-09-17
 - Actualizado: 2026-09-17T16:25:00-05:00.
 - Estado: lista_para_relevo.
 - Tarea: [[tasks/2026-09-17-1550-antigravity-soporte-estudio-modo-web]].
-- Entorno: `D:\CODEX`, rama `main`.
+- Entorno: `D:\CODEX`, rama `main`, commit `e102a80`, push confirmado a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
 
 ## Hecho
 - Petición del usuario solucionada: se corrigió el problema en la versión web (GitHub Pages / Vercel) donde al tener 2 tarjetas nuevas en un mazo ("dolor"), el modal de estudio mostraba "Total: 0", "Disponibles para repasar hoy: 0" y el botón "Iniciar bloque" quedaba inhabilitado.
