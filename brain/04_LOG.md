@@ -5,6 +5,12 @@ updated: 2026-09-17
 
 # Registro de trabajo
 
+## 2026-09-17 — Subida consolidada a GitHub (commit acfe525)
+
+- Antigravity consolidó todos los cambios acumulados, validó la totalidad de las suites y realizó el push a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Correcciones antes del commit: ajuste de versión de caché en `tests/test_server.py` (92/92 tests Python OK), corrección de colisión de arte decorativo en móvil estrecho en `practice.css` (dist y docs), e inclusión de `tests/screenshots_*/` en `.gitignore`.
+- Validación: 92/92 pruebas Python OK, 11 suites Node/Chromium E2E OK, `git push` OK con salida 0 (`9943bf9..acfe525`), `tools/check-brain.ps1` OK. Ficha: [[tasks/2026-09-17-1425-antigravity-subir-cambios-github]].
+
 ## 2026-09-17 — Dirección visual y animaciones propuestas
 
 - Codex creó e inspeccionó maqueta de Jugar y aprender (design/lumcards-juegos-concepto-v1.png), con brief y movimiento en [[tasks/2026-09-17-0715-codex-direccion-visual]]. No es interfaz funcional ni cambio instalado.

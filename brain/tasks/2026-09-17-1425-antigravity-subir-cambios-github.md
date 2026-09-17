@@ -7,10 +7,10 @@ tags: [lumcards, tarea, despliegue]
 ## Control
 
 - ID: 2026-09-17-1425-antigravity-subir-cambios-github
-- Estado: en_curso
+- Estado: hecha
 - Responsable y sesión: Antigravity (sesión f9e636cf-84bd-45d5-bb8e-6784d811fbbb).
-- Actualizado: 2026-09-17T14:28:00-05:00.
-- Entorno: `D:\CODEX`, rama `main`, commit base `9943bf9`, remoto `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Actualizado: 2026-09-17T14:30:00-05:00.
+- Entorno: `D:\CODEX`, rama `main`, commit `acfe525`, push exitoso a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
 
 ## Objetivo y aceptación
 
@@ -38,18 +38,20 @@ tags: [lumcards, tarea, despliegue]
 - 14:24: Suites E2E avanzadas ejecutadas: selección de carpetas, importación y menús, legibilidad de preview, bloques de estudio y audio pasando 100% OK.
 - 14:25: Suite `test_practice_studio.cjs` detectó colisión de arte decorativo en vista móvil vertical; ajustada escala y padding en `dist/practice.css` y `docs/practice.css`. Revalidación completa PASS en los 5 viewports/condiciones.
 - 14:27: `tests/screenshots_*/` añadido a `.gitignore` para evitar bloat en el repositorio remoto. Paridad 100% verificada entre `dist/` y `docs/`.
+- 14:28: Commit `acfe525` generado con éxito.
+- 14:29: `git push origin main` completado con éxito (`9943bf9..acfe525`).
 
 ## Validación
 
 - Python: 92/92 pruebas superadas en 18.2s (`.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`).
 - Node/JS: todas las suites superadas (`test_frontend.cjs`, `test_sync_manager.cjs`, `test_study_games.cjs`, `test_quizlet_games.cjs`, `test_anki_game_interaction.cjs`, `test_practice_folder_selection.cjs`, `test_import_menus_verify.cjs`, `test_preview_legibilidad_verify.cjs`, `test_study_blocks_and_preview.cjs`, `test_practice_studio.cjs`, `test_browser_study.cjs`).
+- Git push: código de salida 0 hacia `origin/main` (`9943bf9..acfe525`).
 - Brain: `powershell -NoProfile -ExecutionPolicy Bypass -File tools/check-brain.ps1` PASS.
 
 ## Pendiente y primer paso
 
-- Ejecutar commit y push a `origin/main`.
-- Verificar resultado en GitHub.
-- Actualizar estado a `hecha` y cerrar relevo.
+- Ninguno para esta tarea.
+- Siguiente paso: Esperar instrucciones del usuario para nuevos hitos de producto.
 
 ## Bloqueos y procesos
 
@@ -58,4 +60,4 @@ tags: [lumcards, tarea, despliegue]
 
 ## Cierre
 
-- En curso hacia commit y push.
+- Tarea concluida, cambios confirmados y publicados en GitHub. Enlace en [[08_HANDOFF]].

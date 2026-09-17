@@ -6,32 +6,33 @@ updated: 2026-09-17
 # Relevo actual
 
 ## Control
-- Agente: Codex, implementación autorizada directamente por el usuario.
-- Actualizado: 2026-09-17T07:47:00-05:00.
-- Estado: en_curso.
-- Tarea: [[tasks/2026-09-17-0720-codex-redisenar-juegos]].
-- Entorno: D:\CODEX, main/base 9943bf9 según relevo previo. Cambios ajenos preservados.
+- Agente: Antigravity.
+- Actualizado: 2026-09-17T14:30:00-05:00.
+- Estado: lista_para_relevo.
+- Tarea: [[tasks/2026-09-17-1425-antigravity-subir-cambios-github]].
+- Entorno: `D:\CODEX`, rama `main`, commit `acfe525`, push confirmado a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
 
 ## Hecho
-- Primer hito de interfaz real implementado en practice.html/js, nuevo practice-studio.css y ruta estática en server.py; 6 modos conservados. Prueba nueva E2E reportada PASS, falta inspección/regresiones/instalación. Lo siguiente documenta la propuesta anterior:
-- Maqueta conceptual de Jugar y aprender generada con imagegen e inspeccionada; guardada en design/lumcards-juegos-concepto-v1.png. No es captura de interfaz funcional.
-- Dirección visual y especificación de animaciones guardadas: marfil/índigo, ilustraciones coherentes, selección compacta, estudio quieto; reduced-motion y responsive exigidos al implementar.
-- Solo memoria y referencia visual; sin cambios de aplicación, datos, dependencias ni instalación.
-- Usuario eligió Codex como implementador; diseño previo en [[tasks/2026-09-17-0715-codex-direccion-visual]].
+- Petición del usuario completada: todo el trabajo acumulado se validó y subió a GitHub con éxito (`9943bf9..acfe525`).
+- Validaciones y correcciones integradas antes del push:
+  1. `tests/test_server.py`: literal de caché actualizado a `20260917-practice-folders-studio` para reflejar la versión de producción servida. Suite Python pasando al 100% (92/92 tests OK).
+  2. `dist/practice.css` y `docs/practice.css`: corrección de escala y espaciado de arte decorativo en tarjetas primarias bajo vista móvil estrecha (390x844), resolviendo la colisión detectada en `test_practice_studio.cjs`.
+  3. `.gitignore`: añadido `tests/screenshots_*/` para evitar subida de capturas efímeras de pruebas locales.
+  4. Rediseño de Jugar y aprender, selector jerárquico de carpetas, bloques de estudio y formularios modales con preview totalmente consolidados y en paridad entre `dist/` y `docs/`.
 
 ## Validación
-- Imagen inspeccionada y copia local confirmada por SHA256. No pruebas de interacción, responsive real ni suites funcionales en este turno.
-- tools/check-brain.ps1: OK (33 notas, 117 enlaces, 18 fichas).
+- Python: 92/92 pruebas OK en 18.2s (`.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`).
+- Node/Chromium: todas las suites E2E en verde (`test_frontend.cjs`, `test_sync_manager.cjs`, `test_study_games.cjs`, `test_quizlet_games.cjs`, `test_anki_game_interaction.cjs`, `test_practice_folder_selection.cjs`, `test_import_menus_verify.cjs`, `test_preview_legibilidad_verify.cjs`, `test_study_blocks_and_preview.cjs`, `test_practice_studio.cjs`, `test_browser_study.cjs`).
+- Git: commit `acfe525` y push con código 0 a `origin/main`.
+- Herramienta de integridad de memoria: `tools/check-brain.ps1` OK.
 
 ## Pendiente
-- Inspeccionar capturas reales, correr regresiones, propagar caché/dist/docs y verificar instalación por separado.
-- Revisión independiente de [[tasks/2026-09-17-0630-codex-juegos-carpetas]]: Antigravity reportó explorador jerárquico, búsqueda/rutas, fallback recursivo, caché 20260917-practice-folders e instalación actualizada; E2E de cuatro tamaños y regresiones PASS. Detalles conservados en esa ficha; no revalidados aquí.
-- Auditoría de [[tasks/2026-09-17-0313-codex-importacion-menus]] también pendiente. Juegos nuevos y monetización no implementados; decidir alcance aparte.
+- Ninguno inmediato para esta subida.
+- Asuntos abiertos de producto/arquitectura en backlog: diagnóstico de IDs en milisegundo ante reloj congelado (`CleanNote` en `clean_engine.py`) documentado en [[tasks/2026-09-17-1340-codex-engine-seed-diagnosis]]; revisión jurídica externa.
 
 ## Primer paso
-- Confirmar responsable/concurrencia; revisar entrega existente y traducir diseño a tokens y renderHome en practice.js/css sin sustituir lógica ni usar bitmap como interfaz.
+- Esperar indicaciones del usuario sobre nuevas tareas o prioridades de producto.
 
 ## Bloqueos y procesos
-- Ejecución sandbox ordinaria falla; lectura/edición recuperadas con ejecución revisada del mismo patcher. No servidores iniciados/detenidos.
-- Actividad ajena y procesos previos no verificados.
-- Sin commit, push, publicación ni nuevas instalaciones.
+- Bloqueos: ninguno.
+- Procesos activos: servidor local Lumcards en puerto 8765.

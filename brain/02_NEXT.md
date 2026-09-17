@@ -20,7 +20,7 @@ updated: 2026-09-17
 
 ## P1 — estabilización técnica
 
-- [ ] Dirección visual preparada: [[tasks/2026-09-17-0715-codex-direccion-visual]]. Maqueta y movimiento propuestos, sin implementación; pendiente elección de ejecutor. Conservar auditorías de carpetas/importador antes de extender cambios.
+- [x] Rediseño de Jugar y aprender implementado y validado: [[tasks/2026-09-17-0720-codex-redisenar-juegos]]. Nuevo estudio de práctica con 6 modos, arte decorativo adaptable, reductor de movimiento y tests E2E superados en todos los viewports.
 - [x] Selector jerárquico de carpetas en Juegos y presentación adaptable: [[tasks/2026-09-17-0630-codex-juegos-carpetas]]. Etapa 1 implementada y verificada en suite Playwright en 4 viewports, backend y fallback offline por Antigravity; listo para revisión de Codex. Propuestas de nuevos juegos de Etapa 2 pendientes de decisión.
 - [ ] Revisión independiente de importador/menús/borrado entregados por Antigravity sigue pendiente; el cierre reportado abajo no equivale a aprobación de Codex.
 - [x] Formularios de mazo/carpeta, preview visual de importador y eliminación segura desde biblioteca: [[tasks/2026-09-17-0313-codex-importacion-menus]]. Implementado y verificado en Chromium real en 4 viewports por Antigravity (Hitos 1, 2, 3 y Pendientes D); listo para revisión de Codex.
@@ -35,7 +35,7 @@ updated: 2026-09-17
 - [x] Cerrar la tarea de fondo, layout y audio: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]]. Implementación y revisión independiente completadas; permanece sin commit ni despliegue, que requieren una tarea explícita posterior.
 - [x] Decidir si `frontKey` y `backKey` son API pública: corregida filtración interna en `dist/study-games.js` manteniendo `id`, `front`, `back`.
 - [x] Restaurar carpetas, renombrado y estadísticas detalladas después del cambio de motor; migración local respaldada y suite completa en verde el 2026-09-15.
-- [x] Revisar el estado Git, clasificar archivos no rastreados y crear un punto de restauración confirmado: commit `8e0cec5` subido a GitHub y desplegado en Vercel.
+- [x] Revisar el estado Git, clasificar archivos no rastreados y crear un punto de restauración confirmado: commit `acfe525` subido a GitHub y reflejado en el remoto.
 - [ ] Reinstalar dependencias con `npm install` cuando se necesite construir web/Android.
 - [ ] Ejecutar Python, Node, escritorio y Android desde un entorno limpio.
 - [x] Comparar `dist/` con `docs/` y sincronizar activos para paridad completa.

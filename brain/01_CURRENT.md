@@ -44,6 +44,7 @@ updated: 2026-09-17
 
 ## Validación conocida
 
+- 2026-09-17: Suite completa de Python (92 pruebas) pasando al 100% en verde (`test_clean_engine.py`, `test_practice_http.py`, `test_server.py`, etc.) y 11 suites Node/Chromium E2E en verde. Rediseño de estudio de práctica con 6 modos, selector jerárquico de carpetas, bloques de estudio y modales responsivos consolidados en commit `acfe525`.
 - 2026-09-17: Selección jerárquica de carpetas en Jugar y aprender (`dist/practice.js`, `dist/practice.css`) verificada al 100% en suite Playwright Chromium (`tests/test_practice_folder_selection.cjs`) con mazo sintético jerárquico en 4 viewports (1366x768, 1024x650, 390x844, 844x390). 18 capturas visuales en `tests/screenshots_practice_folders/`. Inicio con carpeta que contiene submazos sin tarjetas duplicadas (33 únicas), desambiguación de homónimos en rutas distintas, selector de importación `#import-deck` intacto y fallback offline sin servidor verificado. 10/10 tests en `test_clean_engine.py` y 7/7 en `test_practice_http.py` pasando. Detalle en [[tasks/2026-09-17-0630-codex-juegos-carpetas]].
 - 2026-09-17: Suite completa en Chromium (`tests/test_study_blocks_and_preview.cjs`) con mazo sintético de 565 tarjetas y datos temporales pasando al 100% en los 4 viewports (1366x768, 1024x650, 390x844, 844x390). 15 capturas inspeccionadas. 91 pruebas unitarias Python en verde. Personalizador con tema Índigo y centrado, persistencia de bloques en disco (`study_blocks.json`), conteo sin duplicar por «Otra vez», resumen al finalizar primera pasada y vistas previas reactivas split-view / móvil. Detalle en [[tasks/2026-09-17-0145-antigravity-personalizacion-bloques-vistas]].
 - 2026-09-15: Suite completa de Python ampliada a 87 pruebas, cinco suites Node/JS y comprobación funcional de escritorio/web en verde. La biblioteca local se migró con copia previa: 3.971 tarjetas conservadas, jerarquía consolidada sin separadores dañados ni nombres duplicados; `Mi progreso` y las acciones de carpeta/renombrado se verificaron en el servidor real. Detalle en [[tasks/2026-09-15-0047-codex-regresiones-motor-carpetas-progreso]].
@@ -54,7 +55,7 @@ updated: 2026-09-17
 
 ## Estado del repositorio
 
-- Rama `main` conectada y sincronizada con `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Rama `main` conectada y sincronizada con `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`), commit `acfe525`.
 - Avances consolidados confirmados y subidos a GitHub; despliegue automático activo en Vercel (`https://lumcards.vercel.app`).
 - `docs/` sincronizado con `dist/` para paridad completa con la PWA.
 
