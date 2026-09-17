@@ -5,6 +5,12 @@ updated: 2026-09-17
 
 # Registro de trabajo
 
+## 2026-09-17 — Bloques de estudio y recuento dinámico en Modo Web
+
+- Antigravity corrigió el error reportado por el usuario en la versión web (GitHub Pages / Vercel): al crear tarjetas en un mazo, el modal de estudio reportaba 0 tarjetas disponibles y el botón "Iniciar bloque" quedaba deshabilitado, además de marcar el mazo como "Al día".
+- Implementado en `webApi` (`dist/app.js` y `docs/app.js`): `study/block-info`, `study/block-start`, `study/block-clear`, soporte de cola y `blockStatus` en `study` y `review`, y recálculo de contadores (`due`, `new`, `total`, `learned`) en `state`. Caché actualizada a `20260917-web-study-blocks` en `dist/` y `docs/`.
+- Validación: suite específica `tests/test_web_study_blocks.cjs` OK, 92/92 tests Python OK, paridad de activos web 100%, `tools/check-brain.ps1` OK. Ficha: [[tasks/2026-09-17-1550-antigravity-soporte-estudio-modo-web]].
+
 ## 2026-09-17 — Subida consolidada a GitHub (commit acfe525)
 
 - Antigravity consolidó todos los cambios acumulados, validó la totalidad de las suites y realizó el push a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).

@@ -1,10 +1,10 @@
-const CACHE_NAME = 'lumcards-cache-library-20260917-practice-folders-studio';
+const CACHE_NAME = 'lumcards-cache-library-20260917-web-study-blocks';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/app.css?v=20260917-practice-folders-studio',
-  '/student.css?v=20260917-practice-folders-studio',
-  '/app.js?v=20260917-practice-folders-studio',
+  '/app.css?v=20260917-web-study-blocks',
+  '/student.css?v=20260917-web-study-blocks',
+  '/app.js?v=20260917-web-study-blocks',
   '/card-runtime.js',
   '/sync-manager.js',
   '/manifest.json',
@@ -12,9 +12,9 @@ const ASSETS_TO_CACHE = [
   '/icon-192.png',
   '/icon-512.png',
   '/practice.html',
-  '/practice.css?v=20260917-practice-folders-studio',
-  '/practice.js?v=20260917-practice-folders-studio',
-  '/study-games.js?v=20260917-practice-folders-studio'
+  '/practice.css?v=20260917-web-study-blocks',
+  '/practice.js?v=20260917-web-study-blocks',
+  '/study-games.js?v=20260917-web-study-blocks'
 ];
 
 self.addEventListener('install', event => {

@@ -61,6 +61,7 @@ updated: 2026-09-17
 
 ## Observaciones críticas
 
+- 2026-09-17 16:25: soporte de bloques de estudio y conteos dinámicos en Modo Web (GitHub Pages / Vercel / PWA): `webApi` implementa `study/block-info`, `study/block-start`, `study/block-clear`, selección de tarjetas y `blockStatus` con persistencia en `localStorage`. `webApi('state')` recalcula `deck.total`, `deck.due`, `deck.new` y `deck.learned` en tiempo real, corrigiendo el bloqueo donde mazos con tarjetas nuevas mostraban 0 tarjetas disponibles y botón "Iniciar bloque" deshabilitado. Versión de caché renovada a `20260917-web-study-blocks`. Detalle en [[tasks/2026-09-17-1550-antigravity-soporte-estudio-modo-web]].
 - 2026-09-17 03:20: Codex repitió suite de preview PASS, sin aprobar cierre global. Nuevas capturas muestran formularios de mazo comprimidos; importador solo tiene tabla y biblioteca carece de acción eliminar. Plan [[tasks/2026-09-17-0313-codex-importacion-menus]]. Precaución: remove([did]) actual no recorre submazos; pruebas de borrado/backup requeridas. No cambios de aplicación en esta revisión.
 - 2026-09-17 03:08: implementadas y verificadas las correcciones de [[tasks/2026-09-17-0235-codex-preview-legibilidad]]:
   1. Editor de tarjetas amplio (`dialog.dialog-card-editor`) con ancho `min(1200px, 96vw)`, resuelto el límite de 680px en estudio, preview de 520px de ancho y 519px de alto sin scroll horizontal; modo móvil en pestañas accesibles `.mobile-tab-bar` con persistencia de borrador.

@@ -286,7 +286,7 @@ async function syncFromCloudIfAvailable() {
   return false;
 }
 
-function webApi(path, body, method) {
+function webApi(path, body, method = (body ? 'POST' : 'GET')) {
   const store = getWebData();
   const [route, queryString] = path.split('?');
   const params = new URLSearchParams(queryString || '');
@@ -305,13 +305,29 @@ function webApi(path, body, method) {
       const isFolder = Boolean(deck.isFolder || store.decks.some(other => other !== deck && other.parentName === deck.name));
       hierarchyChanged ||= deck.isFolder !== isFolder;
       deck.isFolder = isFolder;
+
+      const prefix = deck.name + '::';
+      const childDeckIds = new Set(
+        store.decks
+          .filter(d => d.name === deck.name || d.name.startsWith(prefix))
+          .map(d => String(d.id))
+      );
+      const oldTotal = deck.total, oldDue = deck.due, oldNew = deck.new;
+      const deckCards = store.cards.filter(c => childDeckIds.has(String(c.deckId)));
+      deck.total = deckCards.length;
+      deck.new = deckCards.filter(c => c.state === 'new').length;
+      deck.due = deckCards.filter(c => c.state === 'due' || c.state === 'learn' || c.state === 'new').length;
+      deck.learned = deckCards.filter(c => (c.reps || 0) > 0 || c.state === 'review' || c.state === 'learned').length;
+      deck.childIds = Array.from(childDeckIds);
+      if (deck.total !== oldTotal || deck.due !== oldDue || deck.new !== oldNew) hierarchyChanged = true;
     });
     if (hierarchyChanged) saveWebData(store);
+    const dueTodayTotal = store.cards.filter(c => c.state === 'due' || c.state === 'learn' || c.state === 'new').length;
     return {
       decks: store.decks,
       cards: store.cards.slice(0, 50),
-      counts: { totalCards: store.cards.length, dueToday: store.cards.filter(c => c.state === 'due').length },
-      stats: store.stats,
+      counts: { totalCards: store.cards.length, dueToday: dueTodayTotal },
+      stats: { ...store.stats, dueToday: dueTodayTotal },
       settings: store.settings,
       isWebMode: true
     };
@@ -338,7 +354,11 @@ function webApi(path, body, method) {
       };
       store.cards.unshift(newCard);
       const deck = store.decks.find(d => String(d.id) === String(newCard.deckId));
-      if (deck) { deck.total = (deck.total || 0) + 1; deck.new = (deck.new || 0) + 1; }
+      if (deck) {
+        deck.total = (deck.total || 0) + 1;
+        deck.new = (deck.new || 0) + 1;
+        deck.due = (deck.due || 0) + 1;
+      }
       saveWebData(store);
       return newCard;
     }
@@ -351,8 +371,20 @@ function webApi(path, body, method) {
     if (starred === '1') list = list.filter(c => c.starred);
     const offset = Number(params.get('offset')) || 0;
     const limit = Number(params.get('limit')) || 50;
+
+    const blockKey = String(deckId || 'all');
+    const activeBlock = store._study_blocks?.[blockKey];
+    const selectedSet = new Set((activeBlock?.selectedCardIds || []).map(String));
+    const reviewedSet = new Set((activeBlock?.reviewedCardIds || []).map(String));
+    const paged = list.slice(offset, offset + limit).map(c => ({
+      ...c,
+      inBlock: selectedSet.has(String(c.id)),
+      blockReviewed: reviewedSet.has(String(c.id)),
+      blockPending: selectedSet.has(String(c.id)) && !reviewedSet.has(String(c.id))
+    }));
+
     return {
-      cards: list.slice(offset, offset + limit),
+      cards: paged,
       total: list.length,
       offset,
       limit,
@@ -392,6 +424,12 @@ function webApi(path, body, method) {
         isCloze: b.kind === 'cloze'
       }));
       store.cards.unshift(...createdCards);
+      const deck = store.decks.find(d => String(d.id) === String(body.deckId));
+      if (deck) {
+        deck.total = (deck.total || 0) + createdCards.length;
+        deck.new = (deck.new || 0) + createdCards.length;
+        deck.due = (deck.due || 0) + createdCards.length;
+      }
       saveWebData(store);
       return { created: createdCards.length };
     }
@@ -454,22 +492,211 @@ function webApi(path, body, method) {
   if (route === 'decks/config') {
     return { newPerDay: 20, revPerDay: 200 };
   }
+  if (route === 'study/block-info') {
+    const deckId = params.get('deckId');
+    const blockKey = String(deckId || 'all');
+    let list = store.cards.slice();
+    if (deckId && deckId !== 'all') {
+      const targetDeck = store.decks.find(d => String(d.id) === String(deckId));
+      if (targetDeck) {
+        const prefix = targetDeck.name + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === targetDeck.name || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        list = list.filter(c => childDeckIds.has(String(c.deckId)));
+      } else {
+        list = list.filter(c => String(c.deckId) === String(deckId));
+      }
+    }
+    const totalDeck = list.length;
+    const newCards = list.filter(c => c.state === 'new').length;
+    const learnDue = list.filter(c => c.state === 'learn').length;
+    const revDue = list.filter(c => c.state === 'due').length;
+    const availableToday = newCards + learnDue + revDue;
+
+    if (!store._study_blocks) store._study_blocks = {};
+    const block = store._study_blocks[blockKey];
+    let cleanBlock = null;
+
+    if (block && Array.isArray(block.selectedCardIds) && block.selectedCardIds.length > 0) {
+      const cardMap = new Map(store.cards.map(c => [String(c.id), c]));
+      const validSelected = block.selectedCardIds.map(String).filter(id => cardMap.has(id));
+      const reviewedSet = new Set((block.reviewedCardIds || []).map(String));
+      const againSet = new Set((block.againCardIds || []).map(String));
+
+      const validReviewed = validSelected.filter(id => reviewedSet.has(id));
+      const validAgain = validSelected.filter(id => againSet.has(id));
+      const pendingCount = Math.max(0, validSelected.length - validReviewed.length);
+
+      cleanBlock = {
+        deckId: block.deckId || blockKey,
+        requestedLimit: block.requestedLimit,
+        actualLimit: validSelected.length,
+        total: validSelected.length,
+        reviewedCount: validReviewed.length,
+        pendingCount: pendingCount,
+        againCount: validAgain.length,
+        progressPct: validSelected.length ? Math.round((validReviewed.length / validSelected.length) * 100) : 100,
+        firstPassDone: pendingCount === 0,
+        pending: pendingCount,
+        selectedCardIds: validSelected,
+        reviewedCardIds: validReviewed,
+        againCardIds: validAgain,
+        explanation: block.explanation || ''
+      };
+    }
+
+    return {
+      deckId: blockKey,
+      totalDeck: totalDeck,
+      totalDeckCards: totalDeck,
+      availableToday: availableToday,
+      hasActiveBlock: cleanBlock !== null && cleanBlock.pendingCount > 0,
+      pendingNew: newCards,
+      pendingLearn: learnDue,
+      pendingDue: revDue,
+      learningNotDue: 0,
+      unmaturedReviews: 0,
+      activeBlock: cleanBlock
+    };
+  }
+  if (route === 'study/block-start' && body) {
+    const deckId = body.deckId;
+    const blockKey = String(deckId || 'all');
+    let list = store.cards.slice();
+    if (deckId && deckId !== 'all') {
+      const targetDeck = store.decks.find(d => String(d.id) === String(deckId));
+      if (targetDeck) {
+        const prefix = targetDeck.name + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === targetDeck.name || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        list = list.filter(c => childDeckIds.has(String(c.deckId)));
+      } else {
+        list = list.filter(c => String(c.deckId) === String(deckId));
+      }
+    }
+
+    const eligible = list.filter(c => c.state === 'due' || c.state === 'learn' || c.state === 'new');
+    if (!eligible.length) {
+      return { started: false, availableToday: 0, learningNotDue: 0, explanation: 'No hay tarjetas disponibles para hoy.' };
+    }
+
+    let reqLimit = 20;
+    if (String(body.limit).toLowerCase() === 'all') {
+      reqLimit = eligible.length;
+    } else {
+      reqLimit = Math.max(1, Number(body.limit) || 20);
+    }
+    const actualLimit = Math.min(reqLimit, eligible.length);
+    const selected = eligible.slice(0, actualLimit);
+    const selectedIds = selected.map(c => c.id);
+
+    if (!store._study_blocks) store._study_blocks = {};
+    store._study_blocks[blockKey] = {
+      deckId: blockKey,
+      requestedLimit: body.limit,
+      actualLimit: actualLimit,
+      total: actualLimit,
+      selectedCardIds: selectedIds,
+      reviewedCardIds: [],
+      againCardIds: [],
+      created: Date.now()
+    };
+    saveWebData(store);
+
+    return {
+      success: true,
+      saved: true,
+      started: true,
+      deckId: blockKey,
+      total: actualLimit,
+      selectedCardIds: selectedIds,
+      block: {
+        total: actualLimit,
+        pending: actualLimit,
+        reviewedCount: 0
+      },
+      explanation: actualLimit < reqLimit ? `Se seleccionaron las ${actualLimit} tarjetas disponibles hoy.` : ''
+    };
+  }
+  if (route === 'study/block-clear') {
+    const blockKey = String(body?.deckId || 'all');
+    if (store._study_blocks && store._study_blocks[blockKey]) {
+      delete store._study_blocks[blockKey];
+      saveWebData(store);
+    }
+    return { success: true, saved: true, cleared: true, deckId: blockKey };
+  }
   if (route === 'study') {
     const deckId = body?.deckId;
+    const blockKey = String(deckId || 'all');
+    const block = store._study_blocks?.[blockKey];
     let list = store.cards.slice();
-    if (deckId && deckId !== 'all') list = list.filter(c => String(c.deckId) === String(deckId));
-    const due = list.filter(c => c.state === 'due');
-    const learn = list.filter(c => c.state === 'learn');
-    const news = list.filter(c => c.state === 'new');
-    const queue = [...due, ...learn, ...news];
+    if (deckId && deckId !== 'all') {
+      const targetDeck = store.decks.find(d => String(d.id) === String(deckId));
+      if (targetDeck) {
+        const prefix = targetDeck.name + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === targetDeck.name || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        list = list.filter(c => childDeckIds.has(String(c.deckId)));
+      } else {
+        list = list.filter(c => String(c.deckId) === String(deckId));
+      }
+    }
+
+    let queue = [];
+    let blockStatus = null;
+
+    if (block && Array.isArray(block.selectedCardIds) && block.selectedCardIds.length > 0) {
+      const cardMap = new Map(store.cards.map(c => [String(c.id), c]));
+      const reviewedSet = new Set((block.reviewedCardIds || []).map(String));
+      const validSelected = block.selectedCardIds.map(String).filter(id => cardMap.has(id));
+      const pendingIds = validSelected.filter(id => !reviewedSet.has(id));
+
+      queue = pendingIds.map(id => cardMap.get(id)).filter(Boolean);
+      const total = validSelected.length;
+      const revCount = total - pendingIds.length;
+      blockStatus = {
+        active: true,
+        current: Math.min(total, revCount + 1),
+        total: total,
+        reviewedCount: revCount,
+        againCount: (block.againCardIds || []).length,
+        progressPct: total ? Math.round((revCount / total) * 100) : 100,
+        firstPassDone: pendingIds.length === 0,
+        pending: pendingIds.length
+      };
+    } else {
+      const due = list.filter(c => c.state === 'due');
+      const learn = list.filter(c => c.state === 'learn');
+      const news = list.filter(c => c.state === 'new');
+      queue = [...due, ...learn, ...news];
+    }
+
     return {
       cards: queue,
-      counts: { new: news.length, learn: learn.length, due: due.length },
-      intervals: ['<1m', '<10m', '1d', '4d']
+      counts: {
+        new: queue.filter(c => c.state === 'new').length,
+        learn: queue.filter(c => c.state === 'learn').length,
+        due: queue.filter(c => c.state === 'due').length,
+        total: queue.length
+      },
+      intervals: ['<1m', '<10m', '1d', '4d'],
+      finished: queue.length === 0,
+      blockStatus: blockStatus
     };
   }
   if (route === 'review' && body) {
     const c = store.cards.find(x => String(x.id) === String(body.id));
+    let blockStatus = null;
     if (c) {
       const r = Number(body.rating) || 3;
       c.reps = (c.reps || 0) + 1;
@@ -478,9 +705,41 @@ function webApi(path, body, method) {
       else if (r === 3) { c.interval = Math.max(1, Math.round((c.interval || 1) * 2.2)); c.state = 'review'; c.due = `${c.interval}d`; }
       else { c.interval = Math.max(2, Math.round((c.interval || 1) * 3.2)); c.state = 'review'; c.due = `${c.interval}d`; }
       store.stats.reviewedToday = (store.stats.reviewedToday || 0) + 1;
+
+      if (store._study_blocks) {
+        for (const [bKey, block] of Object.entries(store._study_blocks)) {
+          const selectedStr = (block.selectedCardIds || []).map(String);
+          if (selectedStr.includes(String(c.id))) {
+            if (!Array.isArray(block.reviewedCardIds)) block.reviewedCardIds = [];
+            if (!block.reviewedCardIds.map(String).includes(String(c.id))) {
+              block.reviewedCardIds.push(c.id);
+            }
+            if (r === 1) {
+              if (!Array.isArray(block.againCardIds)) block.againCardIds = [];
+              if (!block.againCardIds.map(String).includes(String(c.id))) {
+                block.againCardIds.push(c.id);
+              }
+            }
+            const total = selectedStr.length;
+            const revCount = block.reviewedCardIds.length;
+            const pending = Math.max(0, total - revCount);
+            blockStatus = {
+              active: true,
+              current: Math.min(total, revCount + 1),
+              total: total,
+              reviewedCount: revCount,
+              againCount: (block.againCardIds || []).length,
+              progressPct: total ? Math.round((revCount / total) * 100) : 100,
+              firstPassDone: pending === 0,
+              pending: pending
+            };
+          }
+        }
+      }
+
       saveWebData(store);
     }
-    return { success: true };
+    return { success: true, blockStatus };
   }
   if (route === 'star' && body) {
     const c = store.cards.find(x => String(x.id) === String(body.id));

@@ -7,31 +7,34 @@ updated: 2026-09-17
 
 ## Control
 - Agente: Antigravity.
-- Actualizado: 2026-09-17T14:30:00-05:00.
+- Actualizado: 2026-09-17T16:25:00-05:00.
 - Estado: lista_para_relevo.
-- Tarea: [[tasks/2026-09-17-1425-antigravity-subir-cambios-github]].
-- Entorno: `D:\CODEX`, rama `main`, commit `acfe525`, push confirmado a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Tarea: [[tasks/2026-09-17-1550-antigravity-soporte-estudio-modo-web]].
+- Entorno: `D:\CODEX`, rama `main`.
 
 ## Hecho
-- Petición del usuario completada: todo el trabajo acumulado se validó y subió a GitHub con éxito (`9943bf9..acfe525`).
-- Validaciones y correcciones integradas antes del push:
-  1. `tests/test_server.py`: literal de caché actualizado a `20260917-practice-folders-studio` para reflejar la versión de producción servida. Suite Python pasando al 100% (92/92 tests OK).
-  2. `dist/practice.css` y `docs/practice.css`: corrección de escala y espaciado de arte decorativo en tarjetas primarias bajo vista móvil estrecha (390x844), resolviendo la colisión detectada en `test_practice_studio.cjs`.
-  3. `.gitignore`: añadido `tests/screenshots_*/` para evitar subida de capturas efímeras de pruebas locales.
-  4. Rediseño de Jugar y aprender, selector jerárquico de carpetas, bloques de estudio y formularios modales con preview totalmente consolidados y en paridad entre `dist/` y `docs/`.
+- Petición del usuario solucionada: se corrigió el problema en la versión web (GitHub Pages / Vercel) donde al tener 2 tarjetas nuevas en un mazo ("dolor"), el modal de estudio mostraba "Total: 0", "Disponibles para repasar hoy: 0" y el botón "Iniciar bloque" quedaba inhabilitado.
+- Cambios realizados en Modo Web (`webApi` en `dist/app.js` y `docs/app.js`):
+  1. `webApi('study/block-info')`: implementado para calcular dinámicamente `totalDeckCards`, `availableToday` (tarjetas nuevas + aprendizaje + vencidas), pendientes por estado y estado del bloque activo en `store._study_blocks`.
+  2. `webApi('study/block-start')` y `webApi('study/block-clear')`: implementados con selección ordenada de tarjetas y persistencia en `store._study_blocks`.
+  3. `webApi('study')`: actualizado para servir las tarjetas del bloque activo y retornar el objeto `blockStatus` (`active`, `current`, `total`, `pending`, `reviewedCount`, `progressPct`).
+  4. `webApi('review')`: actualizado para registrar las revisiones dentro del bloque activo y devolver el `blockStatus` actualizado.
+  5. `webApi('state')`: recalcula dinámicamente `deck.total`, `deck.new`, `deck.due`, `deck.learned` y `deck.childIds` para cada mazo a partir de `store.cards`, reparando estados antiguos en `localStorage`.
+  6. Renovada la versión de caché a `20260917-web-study-blocks` en `dist/index.html`, `docs/index.html`, `dist/practice.html`, `docs/practice.html`, `dist/sw.js` y `docs/sw.js`.
+  7. Actualizados los tests de regresión `test_server.py`, `test_practice_http.py`, `test_ux_study_audio.cjs` y creada la suite dedicada `tests/test_web_study_blocks.cjs`.
 
 ## Validación
-- Python: 92/92 pruebas OK en 18.2s (`.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`).
-- Node/Chromium: todas las suites E2E en verde (`test_frontend.cjs`, `test_sync_manager.cjs`, `test_study_games.cjs`, `test_quizlet_games.cjs`, `test_anki_game_interaction.cjs`, `test_practice_folder_selection.cjs`, `test_import_menus_verify.cjs`, `test_preview_legibilidad_verify.cjs`, `test_study_blocks_and_preview.cjs`, `test_practice_studio.cjs`, `test_browser_study.cjs`).
-- Git: commit `acfe525` y push con código 0 a `origin/main`.
-- Herramienta de integridad de memoria: `tools/check-brain.ps1` OK.
+- `node tests/test_web_study_blocks.cjs`: OK (prueba completa en VM del ciclo web con creación de mazo, tarjetas, bloque de estudio, revisión y limpieza).
+- `node tests/test_frontend.cjs` y `node tests/test_ux_study_audio.cjs`: OK.
+- `node tests/test_study_blocks_and_preview.cjs`: OK (Chromium real con bloques y vistas previas).
+- `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`: 92/92 pruebas OK en 23.6s.
+- Paridad estricta comprobada (`git diff --no-index`) entre los pares de `dist/` y `docs/`.
 
 ## Pendiente
-- Ninguno inmediato para esta subida.
-- Asuntos abiertos de producto/arquitectura en backlog: diagnóstico de IDs en milisegundo ante reloj congelado (`CleanNote` en `clean_engine.py`) documentado en [[tasks/2026-09-17-1340-codex-engine-seed-diagnosis]]; revisión jurídica externa.
+- Ninguno para esta tarea.
 
 ## Primer paso
-- Esperar indicaciones del usuario sobre nuevas tareas o prioridades de producto.
+- Subir a GitHub `origin/main` y comunicar al usuario.
 
 ## Bloqueos y procesos
 - Bloqueos: ninguno.
