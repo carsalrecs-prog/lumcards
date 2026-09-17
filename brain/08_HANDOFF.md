@@ -10,7 +10,7 @@ updated: 2026-09-17
 - Actualizado: 2026-09-17T16:45:00-05:00.
 - Estado: lista_para_relevo.
 - Tarea: [[tasks/2026-09-17-1632-antigravity-estadisticas-modo-web]].
-- Entorno: `D:\CODEX`, rama `main`, commit base `b4383ce`.
+- Entorno: `D:\CODEX`, rama `main`, commit `d4333ed`, push confirmado a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
 
 ## Hecho
 - Petición del usuario solucionada: "no funciona el apartado de estadisticas en la web puedes ayudarme?".
