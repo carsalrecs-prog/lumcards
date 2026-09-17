@@ -284,15 +284,15 @@ class FakeAudio {
   const practiceHtml = fs.readFileSync(path.join(root, 'dist/practice.html'), 'utf8');
 
   // SW cache name should be updated
-  assert.match(sw, /20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'SW CACHE_NAME should include 20260917-csp, blocks, import-menus, practice-folders or web-study-blocks');
+  assert.match(sw, /20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'SW CACHE_NAME should include 20260917-csp, blocks, import-menus, practice-folders, web-study-blocks or web-stats');
   // index.html references should match
-  assert.match(indexHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'index.html should reference app.css?v=20260917');
-  assert.match(indexHtml, /student\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'index.html should reference student.css?v=20260917');
-  assert.match(indexHtml, /app\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'index.html should reference app.js?v=20260917');
+  assert.match(indexHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference app.css?v=20260917');
+  assert.match(indexHtml, /student\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference student.css?v=20260917');
+  assert.match(indexHtml, /app\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference app.js?v=20260917');
 
-  assert.match(practiceHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'practice.html should reference app.css?v=20260917');
-  assert.match(practiceHtml, /practice\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'practice.html should reference practice.css?v=20260917');
-  assert.match(practiceHtml, /practice\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks)/, 'practice.html should reference practice.js?v=20260917');
+  assert.match(practiceHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference app.css?v=20260917');
+  assert.match(practiceHtml, /practice\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference practice.css?v=20260917');
+  assert.match(practiceHtml, /practice\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference practice.js?v=20260917');
 
   assert.match(indexHtml, /updateViaCache:\s*'none'/, 'index.html must bypass HTTP cache when updating the service worker');
   assert.match(practiceHtml, /updateViaCache:\s*'none'/, 'practice.html must bypass HTTP cache when updating the service worker');

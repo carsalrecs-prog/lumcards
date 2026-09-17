@@ -5,6 +5,12 @@ updated: 2026-09-17
 
 # Registro de trabajo
 
+## 2026-09-17 — Estadísticas y puntos débiles dinámicos en Modo Web
+
+- Antigravity corrigió el apartado de "Estadísticas" (Mi progreso) en la versión web (GitHub Pages / Vercel / PWA): `webApi` devolvía datos en blanco / ceros estáticos en `stats/detailed`, ignoraba el filtro por mazo `deckId`, y la ruta `cards/` interceptaba `cards/weak` impidiendo mostrar sanguijuelas y dificultades.
+- Implementado en `webApi` (`dist/app.js` y `docs/app.js`): recálculo dinámico de `today`, `forecast`, `cardBreakdown`, `calendar`, `history`, `intervals`, `ease`, `retention`, `hourly`, `buttonPresses`, `addedCards` con soporte para selección de mazo y submazos. Endpoint `cards/weak` funcional para detección de sanguijuelas (lapses >= 3) y factores críticos. `webApi('review')` registra historial en `store._revlogs`. Caché actualizada a `20260917-web-stats` en `dist/` y `docs/`.
+- Validación: nueva suite unitaria `tests/test_web_stats.cjs` OK, `test_web_study_blocks.cjs` OK, `test_frontend.cjs` OK, `test_ux_study_audio.cjs` OK, 92/92 tests Python OK, paridad de activos `dist/` y `docs/` estricta, `tools/check-brain.ps1` OK. Ficha: [[tasks/2026-09-17-1632-antigravity-estadisticas-modo-web]].
+
 ## 2026-09-17 — Bloques de estudio y recuento dinámico en Modo Web
 
 - Antigravity corrigió el error reportado por el usuario en la versión web (GitHub Pages / Vercel): al crear tarjetas en un mazo, el modal de estudio reportaba 0 tarjetas disponibles y el botón "Iniciar bloque" quedaba deshabilitado, además de marcar el mazo como "Al día".

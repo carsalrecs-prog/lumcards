@@ -334,8 +334,10 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
   }
   if (route === 'cards') {
     if (method === 'POST' && body) {
+      let newId = Date.now();
+      while (store.cards.some(c => c.id === newId)) newId++;
       const newCard = {
-        id: Date.now(),
+        id: newId,
         deckId: Number(body.deckId) || store.decks[0]?.id || 1,
         modelName: body.kind === 'cloze' ? 'Completar espacios (Cloze)' : 'Básica',
         front: body.front || body.text || '',
@@ -391,6 +393,45 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
       hasMore: offset + limit < list.length
     };
   }
+  if (route === 'cards/weak') {
+    const deckId = params.get('deckId');
+    let list = store.cards.slice();
+    if (deckId && deckId !== 'all') {
+      const targetDeck = store.decks.find(d => String(d.id) === String(deckId));
+      if (targetDeck) {
+        const prefix = targetDeck.name + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === targetDeck.name || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        list = list.filter(c => childDeckIds.has(String(c.deckId)));
+      } else {
+        list = list.filter(c => String(c.deckId) === String(deckId));
+      }
+    }
+    const deckMap = new Map(store.decks.map(d => [String(d.id), d.name]));
+    const weak = [];
+    for (const c of list) {
+      const lapses = c.lapses || (c.reps > 2 && c.state === 'learn' ? 2 : 0);
+      const isLeech = lapses >= 3;
+      const ease = Math.round((c.ease || 2500) / 10);
+      const isCrit = ease < 180;
+      const isLong = (c.front || '').length > 180;
+      if (isLeech || isCrit || isLong) {
+        weak.push({
+          id: c.id,
+          deckId: c.deckId,
+          deckName: deckMap.get(String(c.deckId)) || 'Mazo',
+          front: c.front,
+          lapses: lapses,
+          ease: ease,
+          isLeech: isLeech
+        });
+      }
+    }
+    return { cards: weak.slice(0, 50) };
+  }
   if (route.startsWith('cards/')) {
     const cardId = route.replace('cards/', '');
     if (cardId === 'edit' && body) {
@@ -440,8 +481,10 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     if (method === 'POST' && body) {
       const normalizedName = String(body.name || (route === 'folders' ? 'Nueva carpeta' : 'Nuevo mazo')).replace(/\x1f/g, '::').trim();
       const parts = normalizedName.split('::').filter(Boolean);
+      let newDeckId = Date.now();
+      while (store.decks.some(d => d.id === newDeckId)) newDeckId++;
       const newD = {
-        id: Date.now(),
+        id: newDeckId,
         name: parts.join('::'),
         shortName: parts.at(-1),
         total: 0,
@@ -695,16 +738,48 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     };
   }
   if (route === 'review' && body) {
-    const c = store.cards.find(x => String(x.id) === String(body.id));
+    const c = store.cards.find(x => String(x.id) === String(body.id || body.cardId));
     let blockStatus = null;
     if (c) {
       const r = Number(body.rating) || 3;
       c.reps = (c.reps || 0) + 1;
-      if (r === 1) { c.interval = 0; c.state = 'learn'; c.due = '<1m'; }
-      else if (r === 2) { c.interval = Math.max(1, (c.interval || 1)); c.state = 'due'; c.due = 'Hoy'; }
-      else if (r === 3) { c.interval = Math.max(1, Math.round((c.interval || 1) * 2.2)); c.state = 'review'; c.due = `${c.interval}d`; }
-      else { c.interval = Math.max(2, Math.round((c.interval || 1) * 3.2)); c.state = 'review'; c.due = `${c.interval}d`; }
+      if (r === 1) {
+        c.interval = 0;
+        c.state = 'learn';
+        c.due = '<1m';
+        c.lapses = (c.lapses || 0) + 1;
+        c.ease = Math.max(1300, (c.ease || 2500) - 200);
+      } else if (r === 2) {
+        c.interval = Math.max(1, (c.interval || 1));
+        c.state = 'due';
+        c.due = 'Hoy';
+        c.ease = Math.max(1300, (c.ease || 2500) - 150);
+      } else if (r === 3) {
+        c.interval = Math.max(1, Math.round((c.interval || 1) * 2.2));
+        c.state = 'review';
+        c.due = `${c.interval}d`;
+      } else {
+        c.interval = Math.max(2, Math.round((c.interval || 1) * 3.2));
+        c.state = 'review';
+        c.due = `${c.interval}d`;
+        c.ease = (c.ease || 2500) + 150;
+      }
       store.stats.reviewedToday = (store.stats.reviewedToday || 0) + 1;
+
+      if (!store._revlogs) store._revlogs = [];
+      const elapsed = Number(body.elapsedMs || body.time) || 5000;
+      store._revlogs.push({
+        id: Date.now(),
+        cid: c.id,
+        rating: r,
+        state: c.state,
+        interval: c.interval || 0,
+        ease: c.ease || 2500,
+        time: elapsed
+      });
+      if (store._revlogs.length > 5000) {
+        store._revlogs = store._revlogs.slice(-4000);
+      }
 
       if (store._study_blocks) {
         for (const [bKey, block] of Object.entries(store._study_blocks)) {
@@ -760,32 +835,282 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     return { success: true };
   }
   if (route === 'stats' || route === 'stats/detailed') {
-    const today = new Date();
-    const iso = value => value.toISOString().slice(0, 10);
-    const history = days => Array.from({length: days + 1}, (_, index) => {
-      const ago = days - index, current = new Date(today);
-      current.setDate(current.getDate() - ago);
-      return {date: iso(current), daysAgo: -ago, reviews: ago === 0 ? (store.stats.reviewedToday || 0) : 0, timeMinutes: 0};
+    const deckId = params.get('deckId');
+    let list = store.cards.slice();
+    let deckName = 'Toda la colección';
+    if (deckId && deckId !== 'all') {
+      const targetDeck = store.decks.find(d => String(d.id) === String(deckId));
+      if (targetDeck) {
+        deckName = targetDeck.name;
+        const prefix = targetDeck.name + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === targetDeck.name || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        list = list.filter(c => childDeckIds.has(String(c.deckId)));
+      } else {
+        list = list.filter(c => String(c.deckId) === String(deckId));
+      }
+    }
+
+    const reqYear = params.get('year');
+    const targetYear = reqYear ? parseInt(reqYear, 10) : new Date().getFullYear();
+
+    const totalCards = list.length;
+    const counts = {
+      new: list.filter(c => c.state === 'new' && !c.suspended && !c.buried).length,
+      learning: list.filter(c => c.state === 'learn' && !c.suspended && !c.buried).length,
+      relearning: list.filter(c => c.state === 'relearn' && !c.suspended && !c.buried).length,
+      young: list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.interval || 0) < 21 && !c.suspended && !c.buried).length,
+      mature: list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.interval || 0) >= 21 && !c.suspended && !c.buried).length,
+      suspended: list.filter(c => c.suspended).length,
+      buried: list.filter(c => c.buried).length,
+    };
+
+    const breakdownMeta = {
+      new: ['Nuevas', '#5bb1e8'],
+      learning: ['Aprendiendo', '#f97316'],
+      relearning: ['Reaprendiendo', '#ef4444'],
+      young: ['Jóvenes', '#86efac'],
+      mature: ['Maduras', '#22c55e'],
+      suspended: ['Suspendidas', '#eab308'],
+      buried: ['Enterradas', '#94a3b8']
+    };
+    const cardBreakdown = { total: totalCards };
+    for (const [k, [lbl, col]] of Object.entries(breakdownMeta)) {
+      const cnt = counts[k] || 0;
+      cardBreakdown[k] = {
+        count: cnt,
+        pct: totalCards ? Math.round((cnt / totalCards) * 100) : 0,
+        label: lbl,
+        color: col
+      };
+    }
+
+    const forecastMap = {};
+    list.forEach(c => {
+      if (c.state === 'due' || c.state === 'learn' || c.state === 'new') {
+        forecastMap[0] = (forecastMap[0] || 0) + 1;
+      } else if (c.state === 'review' || c.state === 'learned') {
+        const ivl = Math.max(1, Number(c.interval) || 1);
+        forecastMap[ivl] = (forecastMap[ivl] || 0) + 1;
+      }
     });
-    const forecast = days => Array.from({length: days + 1}, (_, day) => ({day, due: 0}));
+    const forecastSeries = (days) => Array.from({ length: days + 1 }, (_, day) => ({ day, due: forecastMap[day] || 0 }));
+    const f30 = forecastSeries(30);
+    const f90 = forecastSeries(90);
+    const f365 = forecastSeries(365);
+    const totalF30 = f30.reduce((s, x) => s + x.due, 0);
+    const totalF90 = f90.reduce((s, x) => s + x.due, 0);
+    const totalF365 = f365.reduce((s, x) => s + x.due, 0);
+
+    const reviewCards = list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.reps || 0) > 0);
+    const intervalMap = {};
+    const easeMap = {};
+    reviewCards.forEach(c => {
+      const ivl = Math.max(1, Number(c.interval) || 1);
+      intervalMap[ivl] = (intervalMap[ivl] || 0) + 1;
+      const factor = Math.round((c.ease || 2500) / 10);
+      easeMap[factor] = (easeMap[factor] || 0) + 1;
+    });
+    const intDist = Object.keys(intervalMap).sort((a, b) => Number(a) - Number(b)).map(k => ({ interval: Number(k), count: intervalMap[k] }));
+    const easeDist = Object.keys(easeMap).sort((a, b) => Number(a) - Number(b)).map(k => ({ factor: Number(k), count: easeMap[k] }));
+    const avgInt = reviewCards.length ? Math.round((reviewCards.reduce((s, c) => s + (Number(c.interval) || 1), 0) / reviewCards.length) * 10) / 10 : 0;
+    const maxInt = reviewCards.length ? Math.max(...reviewCards.map(c => Number(c.interval) || 1)) : 0;
+    const avgEase = reviewCards.length ? Math.round(reviewCards.reduce((s, c) => s + ((c.ease || 2500) / 10), 0) / reviewCards.length) : 250;
+
+    const addedMap = {};
+    list.forEach(c => {
+      const dStr = new Date(Number(c.id) || Date.now()).toISOString().slice(0, 10);
+      addedMap[dStr] = (addedMap[dStr] || 0) + 1;
+    });
+    const sortedDates = Object.keys(addedMap).sort();
+    const addedAll = sortedDates.map(date => ({ date, count: addedMap[date] }));
+    const addedLast = (days) => {
+      const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      return addedAll.filter(x => x.date >= since);
+    };
+
+    const cardIdSet = new Set(list.map(c => String(c.id)));
+    const allRevlogs = (store._revlogs || []).filter(r => cardIdSet.has(String(r.cid)));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayLogs = allRevlogs.filter(r => new Date(r.id).toISOString().slice(0, 10) === todayStr);
+    const todayTimeSec = todayLogs.reduce((s, r) => s + Math.round((r.time || 5000) / 1000), 0);
+    const todayCount = todayLogs.length || (deckId === 'all' || !deckId ? (store.stats.reviewedToday || 0) : 0);
+    const todayCorrect = todayLogs.filter(r => r.rating > 1).length;
+
+    const ranges = [30, 90, 365];
+    const hourly = {};
+    const buttonPresses = {};
+    ranges.forEach(d => {
+      hourly['days' + d] = Array.from({ length: 24 }, (_, hour) => ({ hour, reviews: 0, correct: 0, rate: null }));
+      buttonPresses['days' + d] = { learning: { 1: 0, 2: 0, 3: 0, 4: 0 }, young: { 1: 0, 2: 0, 3: 0, 4: 0 }, mature: { 1: 0, 2: 0, 3: 0, 4: 0 } };
+    });
+
+    allRevlogs.forEach(r => {
+      const rDate = new Date(r.id);
+      const diffDays = Math.floor((Date.now() - r.id) / 86400000);
+      const hr = rDate.getHours();
+      const cat = (r.interval || 0) < 1 ? 'learning' : (r.interval || 0) < 21 ? 'young' : 'mature';
+      ranges.forEach(d => {
+        if (diffDays <= d) {
+          const hBucket = hourly['days' + d][hr];
+          hBucket.reviews++;
+          if (r.rating > 1) hBucket.correct++;
+          hBucket.rate = Math.round((hBucket.correct / hBucket.reviews) * 100);
+          if (r.rating >= 1 && r.rating <= 4) {
+            buttonPresses['days' + d][cat][r.rating]++;
+          }
+        }
+      });
+    });
+
+    const activityMap = {};
+    allRevlogs.forEach(r => {
+      const dt = new Date(r.id).toISOString().slice(0, 10);
+      if (!activityMap[dt]) activityMap[dt] = { count: 0, timeSeconds: 0 };
+      activityMap[dt].count++;
+      activityMap[dt].timeSeconds += Math.round((r.time || 5000) / 1000);
+    });
+    if ((store.stats.reviewedToday || 0) > 0 && todayLogs.length === 0 && (!deckId || deckId === 'all')) {
+      if (!activityMap[todayStr]) activityMap[todayStr] = { count: store.stats.reviewedToday, timeSeconds: store.stats.reviewedToday * 60 };
+    }
+
     const calendarDays = [];
-    const start = new Date(today.getFullYear(), 0, 1), end = new Date(today.getFullYear(), 11, 31);
-    for (let current = new Date(start); current <= end; current.setDate(current.getDate() + 1)) calendarDays.push({date: iso(current), dayOfWeek: current.getDay(), count: 0, timeSeconds: 0});
-    const emptyPart = (label,color) => ({count:0,pct:0,label,color});
-    const emptyHourly = () => Array.from({length:24},(_,hour)=>({hour,reviews:0,correct:0,rate:null}));
-    const emptyButtons = () => ({learning:{1:0,2:0,3:0,4:0},young:{1:0,2:0,3:0,4:0},mature:{1:0,2:0,3:0,4:0}});
-    const added = series => ({total: store.cards.length, series});
+    const yearStart = new Date(targetYear, 0, 1);
+    const yearEnd = new Date(targetYear, 11, 31);
+    for (let d = new Date(yearStart); d <= yearEnd; d.setDate(d.getDate() + 1)) {
+      const dtStr = d.toISOString().slice(0, 10);
+      const act = activityMap[dtStr] || { count: 0, timeSeconds: 0 };
+      calendarDays.push({
+        date: dtStr,
+        dayOfWeek: d.getDay(),
+        count: act.count,
+        timeSeconds: act.timeSeconds
+      });
+    }
+
+    const historySeries = (days) => {
+      const res = [];
+      for (let i = days; i >= 0; i--) {
+        const cur = new Date();
+        cur.setDate(cur.getDate() - i);
+        const dtStr = cur.toISOString().slice(0, 10);
+        const act = activityMap[dtStr] || { count: 0, timeSeconds: 0 };
+        res.push({
+          date: dtStr,
+          daysAgo: -i,
+          reviews: act.count,
+          timeMinutes: Math.round(act.timeSeconds / 60)
+        });
+      }
+      return res;
+    };
+    const h30 = historySeries(30);
+    const h90 = historySeries(90);
+    const h365 = historySeries(365);
+    const studied30 = h30.filter(x => x.reviews > 0).length;
+    const totRev30 = h30.reduce((s, x) => s + x.reviews, 0);
+
+    const youngReviews = allRevlogs.filter(r => (r.interval || 0) >= 1 && (r.interval || 0) < 21);
+    const matureReviews = allRevlogs.filter(r => (r.interval || 0) >= 21);
+    const allGradReviews = allRevlogs.filter(r => (r.interval || 0) >= 1);
+    const retCalc = (arr) => {
+      const total = arr.length;
+      const correct = arr.filter(r => r.rating > 1).length;
+      return { total, correct, rate: total ? Math.round((correct / total) * 100) : null };
+    };
+
+    const oneDayMs = 86400000;
+    const retPeriod = (sinceMs) => {
+      const filtered = allGradReviews.filter(r => r.id >= sinceMs);
+      const total = filtered.length;
+      const correct = filtered.filter(r => r.rating > 1).length;
+      return { count: total, total: total ? Math.round((correct / total) * 100) + '%' : 'N/A' };
+    };
+
+    const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+    const startOfYesterday = new Date(startOfToday.getTime() - oneDayMs);
+    const startOfWeek = new Date(startOfToday.getTime() - 7 * oneDayMs);
+    const startOfMonth = new Date(startOfToday.getTime() - 30 * oneDayMs);
+    const startOfYear = new Date(startOfToday.getTime() - 365 * oneDayMs);
+
+    const retentionTable = [
+      { key: '0', label: 'Hoy', young: 'N/A', mature: 'N/A', total: retPeriod(startOfToday.getTime()).total, count: retPeriod(startOfToday.getTime()).count },
+      { key: '1', label: 'Ayer', young: 'N/A', mature: 'N/A', total: retPeriod(startOfYesterday.getTime()).total, count: retPeriod(startOfYesterday.getTime()).count },
+      { key: '2', label: 'La semana pasada', young: 'N/A', mature: 'N/A', total: retPeriod(startOfWeek.getTime()).total, count: retPeriod(startOfWeek.getTime()).count },
+      { key: '3', label: 'El mes pasado', young: 'N/A', mature: 'N/A', total: retPeriod(startOfMonth.getTime()).total, count: retPeriod(startOfMonth.getTime()).count },
+      { key: '4', label: 'El año pasado', young: 'N/A', mature: 'N/A', total: retPeriod(startOfYear.getTime()).total, count: retPeriod(startOfYear.getTime()).count },
+    ];
+
+    const availableYears = Array.from(new Set(allRevlogs.map(r => new Date(r.id).getFullYear()).concat([new Date().getFullYear(), targetYear]))).sort();
+
     return {
-      today:{cardsStudied:store.stats.reviewedToday||0,timeSeconds:0,timeMinutes:0,avgSecondsPerCard:0,retentionToday:null,reviewCount:0,learnCount:0},
-      forecast:{days30:forecast(30),days90:forecast(90),days365:forecast(365),total30:0,total90:0,total365:0,dueTomorrow:0,avgDaily30:0,dailyLoad:0},
-      calendar:{year:today.getFullYear(),availableYears:[today.getFullYear()],days:calendarDays,totalReviews:0,daysStudied:0},
-      history:{days30:history(30),days90:history(90),days365:history(365),daysStudied30:0,pctDaysStudied30:0,totalReviews30:store.stats.reviewedToday||0,totalMinutes30:0,avgReviewsPerDay30:0,avgReviewsPerStudiedDay30:0},
-      cardBreakdown:{total:store.cards.length,new:emptyPart('Nuevas','#5bb1e8'),learning:emptyPart('Aprendiendo','#f97316'),relearning:emptyPart('Reaprendiendo','#ef4444'),young:emptyPart('Jóvenes','#86efac'),mature:emptyPart('Maduras','#22c55e'),suspended:emptyPart('Suspendidas','#eab308'),buried:emptyPart('Enterradas','#94a3b8')},
-      intervals:{distribution:[],avgInterval:0,maxInterval:0,totalReviewCards:0},ease:{distribution:[],avgEase:250,totalCardsWithEase:0},
-      retention:{young:{total:0,correct:0,rate:null},mature:{total:0,correct:0,rate:null},all:{total:0,correct:0,rate:null}},
-      retentionTable:['Hoy','Ayer','La semana pasada','El mes pasado','El año pasado'].map((label,index)=>({key:String(index),label,young:'N/A',youngNum:null,mature:'N/A',matureNum:null,total:'N/A',totalNum:null,count:0})),
-      hourly:{days30:emptyHourly(),days90:emptyHourly(),days365:emptyHourly()},buttonPresses:{days30:emptyButtons(),days90:emptyButtons(),days365:emptyButtons()},
-      addedCards:{days30:added([]),days90:added([]),days365:added([]),all:added(store.cards.map(card=>({date:iso(new Date(Number(card.id)||Date.now())),count:1})))},
+      today: {
+        cardsStudied: todayCount,
+        timeSeconds: todayTimeSec,
+        timeMinutes: Math.round(todayTimeSec / 60),
+        avgSecondsPerCard: todayCount ? Math.round(todayTimeSec / todayCount) : 0,
+        retentionToday: todayLogs.length ? Math.round((todayCorrect / todayLogs.length) * 100) : null,
+        reviewCount: todayLogs.filter(r => (r.interval || 0) >= 1).length,
+        learnCount: todayLogs.filter(r => (r.interval || 0) < 1).length
+      },
+      forecast: {
+        days30: f30,
+        days90: f90,
+        days365: f365,
+        total30: totalF30,
+        total90: totalF90,
+        total365: totalF365,
+        dueTomorrow: forecastMap[1] || 0,
+        avgDaily30: Math.round((totalF30 / 30) * 10) / 10,
+        dailyLoad: forecastMap[0] || 0
+      },
+      calendar: {
+        year: targetYear,
+        availableYears: availableYears,
+        days: calendarDays,
+        totalReviews: calendarDays.reduce((s, d) => s + d.count, 0),
+        daysStudied: calendarDays.filter(d => d.count > 0).length
+      },
+      history: {
+        days30: h30,
+        days90: h90,
+        days365: h365,
+        daysStudied30: studied30,
+        pctDaysStudied30: Math.round((studied30 / 31) * 100),
+        totalReviews30: totRev30,
+        totalMinutes30: Math.round(h30.reduce((s, x) => s + x.timeMinutes, 0)),
+        avgReviewsPerDay30: Math.round((totRev30 / 31) * 10) / 10,
+        avgReviewsPerStudiedDay30: studied30 ? Math.round((totRev30 / studied30) * 10) / 10 : 0
+      },
+      cardBreakdown: cardBreakdown,
+      intervals: {
+        distribution: intDist,
+        avgInterval: avgInt,
+        maxInterval: maxInt,
+        totalReviewCards: reviewCards.length
+      },
+      ease: {
+        distribution: easeDist,
+        avgEase: avgEase,
+        totalCardsWithEase: reviewCards.length
+      },
+      retention: {
+        young: retCalc(youngReviews),
+        mature: retCalc(matureReviews),
+        all: retCalc(allGradReviews)
+      },
+      retentionTable: retentionTable,
+      hourly: hourly,
+      buttonPresses: buttonPresses,
+      addedCards: {
+        days30: { total: addedLast(30).reduce((s, x) => s + x.count, 0), series: addedLast(30) },
+        days90: { total: addedLast(90).reduce((s, x) => s + x.count, 0), series: addedLast(90) },
+        days365: { total: addedLast(365).reduce((s, x) => s + x.count, 0), series: addedLast(365) },
+        all: { total: totalCards, series: addedAll }
+      }
     };
   }
   if (route === 'sync/info') {
