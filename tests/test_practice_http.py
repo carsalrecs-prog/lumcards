@@ -261,9 +261,9 @@ class PracticeHTTPTests(unittest.TestCase):
     def test_07_practice_assets_are_served_locally(self):
         page = self.request("/practice.html", raw=True).decode("utf-8")
         self.assertIn('lang="es"', page)
-        self.assertIn('src="/study-games.js"', page)
-        self.assertIn('src="/practice.js"', page)
-        for route in ("/practice.css", "/practice.js", "/study-games.js"):
+        self.assertIn('src="/study-games.js?v=20260917-practice-folders-studio"', page)
+        self.assertIn('src="/practice.js?v=20260917-practice-folders-studio"', page)
+        for route in ("/practice.css?v=20260917-practice-folders-studio", "/practice.js?v=20260917-practice-folders-studio", "/study-games.js?v=20260917-practice-folders-studio"):
             with self.subTest(route=route):
                 content, headers = self.request(route, raw=True, include_headers=True)
                 self.assertGreater(len(content), 50)

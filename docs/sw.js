@@ -1,19 +1,20 @@
-const CACHE_NAME = 'lumcards-cache-library-20260915';
+const CACHE_NAME = 'lumcards-cache-library-20260917-practice-folders-studio';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/app.css',
-  '/student.css?v=20260914',
-  '/app.js?v=20260915',
+  '/app.css?v=20260917-practice-folders-studio',
+  '/student.css?v=20260917-practice-folders-studio',
+  '/app.js?v=20260917-practice-folders-studio',
+  '/card-runtime.js',
   '/sync-manager.js',
   '/manifest.json',
   '/icon.svg',
   '/icon-192.png',
   '/icon-512.png',
   '/practice.html',
-  '/practice.css',
-  '/practice.js',
-  '/study-games.js'
+  '/practice.css?v=20260917-practice-folders-studio',
+  '/practice.js?v=20260917-practice-folders-studio',
+  '/study-games.js?v=20260917-practice-folders-studio'
 ];
 
 self.addEventListener('install', event => {
@@ -37,6 +38,21 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   // No interceptar llamadas externas ni auth
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname.startsWith('/media/')) return;
+
+  // El HTML debe venir de la instalación actual cuando el servidor está disponible.
+  // Así una actualización no queda atrapada por una portada cacheada antigua.
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).then(networkResponse => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      }).catch(() => caches.match(event.request).then(cached => cached || caches.match('/index.html')))
+    );
+    return;
+  }
   
   event.respondWith(
     caches.match(event.request).then(cached => {

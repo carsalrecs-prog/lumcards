@@ -162,7 +162,9 @@ namespace LumcardsDesktop
                     };
                     web.CoreWebView2.ProcessFailed += (sender, e) => ShowError("El visor se cerró inesperadamente. Tus tarjetas siguen guardadas. Vuelve a abrir la aplicación.");
                 }
-                web.CoreWebView2.Navigate(options.Url.ToString());
+                UriBuilder navigationUri = new UriBuilder(options.Url);
+                navigationUri.Query = "desktopLaunch=" + Guid.NewGuid().ToString("N");
+                web.CoreWebView2.Navigate(navigationUri.Uri.ToString());
             }
             catch (WebView2RuntimeNotFoundException) { ShowError("Falta Microsoft Edge WebView2 Runtime, el visor integrado de la aplicación. Instálalo desde la página oficial de Microsoft indicada en README.md y vuelve a abrir Lumcards."); }
             catch (Exception error) { ShowError(error.Message); }

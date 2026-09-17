@@ -199,5 +199,52 @@ class CleanEngineTests(unittest.TestCase):
             self.assertGreater(self.engine.col.card_count(), before_count)
 
 
+    def test_delete_deck_isolated_and_keep_children(self):
+        # 1. Crear carpeta con submazos y tarjetas
+        folder = self.engine.create_folder('Ciencias')
+        deck_fisica = self.engine.add_deck('Ciencias::Física')
+        deck_quimica = self.engine.add_deck('Ciencias::Química')
+
+        self.engine.add_card(deck_fisica['id'], '¿Fuerza?', 'Masa por aceleración')
+        self.engine.add_card(deck_fisica['id'], '¿Energía?', 'Capacidad de realizar trabajo')
+        self.engine.add_card(deck_quimica['id'], '¿Agua?', 'H2O')
+        self.engine.add_card(deck_quimica['id'], '¿Sal?', 'NaCl')
+
+        # Verificar conteos iniciales
+        state = self.engine.state()
+        deck_map = {d['id']: d for d in state['decks']}
+        self.assertEqual(deck_map[deck_fisica['id']]['total'], 2)
+        self.assertEqual(deck_map[deck_quimica['id']]['total'], 2)
+
+        # 2. Eliminar carpeta conservando submazos (keep_children=True)
+        res_keep = self.engine.delete_deck(folder['id'], keep_children=True)
+        self.assertEqual(res_keep['deletedDecks'], 1)
+        self.assertEqual(res_keep['keptDecks'], 2)
+        self.assertGreaterEqual(len(self.engine.list_backups()), 1)
+
+        # La carpeta 'Ciencias' ya no debe existir
+        state2 = self.engine.state()
+        names2 = [d['name'] for d in state2['decks']]
+        self.assertNotIn('Ciencias', names2)
+        self.assertIn('Física', names2)
+        self.assertIn('Química', names2)
+
+        # Las tarjetas deben seguir vivas en los submazos desanidados
+        deck_map2 = {d['name']: d for d in state2['decks']}
+        self.assertEqual(deck_map2['Física']['total'], 2)
+        self.assertEqual(deck_map2['Química']['total'], 2)
+
+        # 3. Eliminar recursivamente mazo con tarjetas (keep_children=False)
+        fisica_id = deck_map2['Física']['id']
+        res_delete_all = self.engine.delete_deck(fisica_id, keep_children=False)
+        self.assertEqual(res_delete_all['deletedDecks'], 1)
+        self.assertEqual(res_delete_all['deletedCards'], 2)
+
+        state3 = self.engine.state()
+        names3 = [d['name'] for d in state3['decks']]
+        self.assertNotIn('Física', names3)
+        self.assertIn('Química', names3)
+
+
 if __name__ == '__main__':
     unittest.main()

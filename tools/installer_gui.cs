@@ -31,7 +31,7 @@ namespace LumcardsInstaller
         private static readonly string[] AppFiles = new string[] {
             "Lumcards.exe", "Lumcards.exe.config", "Cerrar Lumcards.exe",
             "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll",
-            "server.py", "engine.py", "native_image_occlusion.py", "text_import.py", "clean_anki_importer.py", "practice_store.py", "start.ps1", "stop.ps1",
+            "server.py", "engine.py", "clean_engine.py", "native_image_occlusion.py", "text_import.py", "clean_anki_importer.py", "practice_store.py", "start.ps1", "stop.ps1",
             "requirements.txt", "requirements-lock.txt", "README.md", "IDEAS.md", "IMAGE_OCCLUSION_SOURCES.md", "COMMERCIAL_ROADMAP.md",
             "INICIAR LUMCARDS.cmd", "CERRAR LUMCARDS.cmd", "Desinstalar Lumcards.cmd",
             "installer.ps1", "uninstall.ps1", "Instalar Lumcards.cmd", "Instalador Lumcards.exe",
@@ -193,7 +193,7 @@ namespace LumcardsInstaller
                     throw new ArgumentException("Selecciona una carpeta de aplicación, no la raíz de una unidad.");
                 if (targetDir.StartsWith(sourceDir + "\\", StringComparison.OrdinalIgnoreCase) || sourceDir.StartsWith(targetDir + "\\", StringComparison.OrdinalIgnoreCase))
                     throw new ArgumentException("Usa una carpeta separada de la carpeta de origen o la misma ubicación para modo portátil.");
-                foreach (string name in new string[] { "Lumcards.exe", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll", "server.py", "start.ps1" })
+                foreach (string name in new string[] { "Lumcards.exe", "Microsoft.Web.WebView2.Core.dll", "Microsoft.Web.WebView2.WinForms.dll", "WebView2Loader.dll", "server.py", "engine.py", "clean_engine.py", "start.ps1" })
                     if (!File.Exists(Path.Combine(sourceDir, name)))
                         throw new FileNotFoundException("El paquete de escritorio está incompleto: falta " + name + ". Ejecuta tools\\build-desktop.ps1 antes de instalar.");
             }

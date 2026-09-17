@@ -5,25 +5,52 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#4f46e5">
   <title>Jugar y aprender · Lumcards Studio</title>
+  <script>
+    try {
+      if (localStorage.getItem('anki2-theme') === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    } catch (_) {}
+  </script>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=20260917-practice-folders-studio">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <link rel="stylesheet" href="/practice.css">
-  <link rel="stylesheet" href="/student.css?v=20260914">
+  <link rel="stylesheet" href="/practice.css?v=20260917-practice-folders-studio">
+  <link rel="stylesheet" href="/student.css?v=20260917-practice-folders-studio">
   <link rel="manifest" href="/manifest.json">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-  <script defer src="/study-games.js"></script>
-  <script defer src="/practice.js"></script>
+  <script defer src="/study-games.js?v=20260917-practice-folders-studio"></script>
+  <script defer src="/practice.js?v=20260917-practice-folders-studio"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+          .then(registration => registration.update())
+          .catch(() => {});
       });
     }
   </script>
 </head>
-<body>
+<body class="practice-studio">
+  <a class="studio-skip" href="#play-content">Saltar al contenido</a>
+  <aside class="studio-sidebar" aria-label="Navegación de Lumcards">
+    <a class="studio-brand" href="/" aria-label="Lumcards · Mi biblioteca">
+      <div class="play-brand-mark" aria-hidden="true">L<span>✦</span></div>
+      <span><strong>Lumcards</strong><small>Aprende a tu ritmo</small></span>
+    </a>
+    <span class="studio-nav-label">TU ESPACIO</span>
+    <a class="studio-library" href="/"><span aria-hidden="true">↗</span> Mi biblioteca</a>
+    <nav class="play-tabs" aria-label="Práctica e importación">
+      <button type="button" class="btn active" data-tab="play"><span class="studio-nav-icon" aria-hidden="true">✦</span> Jugar y aprender</button>
+      <button type="button" class="btn" data-tab="import"><span class="studio-nav-icon" aria-hidden="true">↥</span> Importar texto</button>
+      <button type="button" class="btn" data-tab="history"><span class="studio-nav-icon" aria-hidden="true">≋</span> Mis resultados</button>
+    </nav>
+    <div class="studio-sidebar-bottom">
+      <button type="button" class="studio-theme-toggle" data-action="toggle-theme" aria-pressed="false"><span class="studio-theme-orb" aria-hidden="true"></span><span data-theme-label>Modo oscuro</span></button>
+      <p>Un poco,<br>todos los días.</p>
+    </div>
+  </aside>
   <header class="play-header">
     <a class="btn" href="/">← Mi biblioteca</a>
     <div class="play-header-brand">
@@ -33,14 +60,9 @@
     <span class="play-header-tag">Suite de Aprendizaje Dinámico</span>
   </header>
   <main class="play-main">
-    <nav class="play-tabs" aria-label="Práctica e importación">
-      <button class="btn active" data-tab="play">Practicar</button>
-      <button class="btn" data-tab="import">Importar texto</button>
-      <button class="btn" data-tab="history">Mis resultados</button>
-    </nav>
     <p id="play-status" role="status" aria-live="polite"></p>
-    <div id="play-content"><p>Preparando tus mazos…</p></div>
+    <div id="play-content" tabindex="-1"><p>Preparando tus mazos…</p></div>
   </main>
-  <canvas id="confetti-canvas"></canvas>
+  <canvas id="confetti-canvas" aria-hidden="true"></canvas>
 </body>
 </html>

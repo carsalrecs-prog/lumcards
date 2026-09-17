@@ -458,6 +458,11 @@ class CleanDeckManager:
                 return did
         if not create:
             return 0
+        if '::' in name:
+            parts = name.split('::')
+            for i in range(1, len(parts)):
+                ancestor = '::'.join(parts[:i])
+                self.id(ancestor, create=True)
         new_id = max(self.col._decks.keys(), default=0) + 1
         if new_id < 1000:
             new_id = int(time.time() * 1000)
@@ -761,10 +766,14 @@ class CleanScheduler:
 
         self.col.update_card(card)
 
+        revlog_id = int(time.time() * 1000)
+        while self.col.db.scalar("select 1 from revlog where id = ?", (revlog_id,)):
+            revlog_id += 1
+
         self.col.db.execute("""
         insert into revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type)
         values (?, ?, -1, ?, ?, ?, ?, ?, ?)
-        """, (now * 1000, card.id, rating, card.ivl, last_ivl, factor, 0, 1 if card.type == 2 else 0))
+        """, (revlog_id, card.id, rating, card.ivl, last_ivl, factor, 0, 1 if card.type == 2 else 0))
         self.col.db.commit()
 
     def deck_due_tree(self):
@@ -1419,6 +1428,27 @@ class CleanEngine:
         self.col = CleanCollection(self.collection_path)
         self.media_dir = self.col.media_dir
         self._active = None
+        self._study_blocks_file = self.data_dir / 'study_blocks.json'
+        self._study_blocks = self._load_study_blocks()
+
+    def _load_study_blocks(self) -> Dict[str, Any]:
+        if hasattr(self, '_study_blocks_file') and self._study_blocks_file.is_file():
+            try:
+                with open(self._study_blocks_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return data if isinstance(data, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    def _save_study_blocks(self):
+        if not hasattr(self, '_study_blocks_file'):
+            return
+        try:
+            with open(self._study_blocks_file, 'w', encoding='utf-8') as f:
+                json.dump(getattr(self, '_study_blocks', {}), f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def close(self):
         self._check_thread()
@@ -1467,6 +1497,18 @@ class CleanEngine:
                 self.add_card(did, front, back, 'demo')
 
     def _deck_id(self, deck_id: Any) -> int:
+        if isinstance(deck_id, str):
+            clean_target = deck_id.removeprefix('folder:')
+            if not clean_target.isdigit():
+                did = self.col.decks.id(clean_target, create=False)
+                if did:
+                    return did
+                prefix = clean_target.lower() + '::'
+                matching = [d['id'] for d in self.col.decks.all() if d['name'].lower().startswith(prefix)]
+                if matching:
+                    return self.col.decks.id(clean_target, create=True)
+            else:
+                deck_id = int(clean_target)
         try:
             deck_id = int(deck_id)
         except (TypeError, ValueError):
@@ -1997,8 +2039,18 @@ class CleanEngine:
         limit = max(1, min(int(limit or 50), 200))
         page_ids = ids[offset:offset + limit]
         due_ids = set(self.col.find_cards('(is:due OR is:new) -is:suspended -is:buried'))
-        cards = [self._card_metadata(self.col.get_card(cid), due_ids, stars) for cid in page_ids]
-        return {'cards': cards, 'total': total, 'offset': offset, 'limit': limit, 'hasMore': offset + len(cards) < total, 'query': query}
+        active_block = getattr(self, '_study_blocks', {}).get(str(deck_id or 'all'))
+        selected_set = set(active_block.get('selectedCardIds', [])) if active_block else set()
+        reviewed_set = set(active_block.get('reviewedCardIds', [])) if active_block else set()
+        cards = []
+        for cid in page_ids:
+            meta = self._card_metadata(self.col.get_card(cid), due_ids, stars)
+            meta['inBlock'] = cid in selected_set
+            meta['blockReviewed'] = cid in reviewed_set
+            meta['blockPending'] = cid in selected_set and cid not in reviewed_set
+            meta['historyReviewed'] = meta.get('reviews', 0) > 0 and cid not in reviewed_set
+            cards.append(meta)
+        return {'cards': cards, 'total': total, 'offset': offset, 'limit': limit, 'hasMore': offset + len(cards) < total, 'query': query, 'hasActiveBlock': bool(active_block)}
 
     def card_detail(self, id: Any) -> Dict[str, Any]:
         self._check_thread()
@@ -2219,6 +2271,80 @@ class CleanEngine:
         self._active = None
         return {'id': did, 'name': new_name}
 
+    def delete_deck(self, deck_id: Any, keep_children: bool = False) -> Dict[str, Any]:
+        self._check_thread()
+        did = self._deck_id(deck_id)
+        deck = self.col.decks.get(did)
+        if not deck:
+            raise ValueError('El mazo o carpeta no existe.')
+        if did == 1 and len(self.col.decks.all()) <= 1:
+            raise ValueError('No puedes eliminar el único mazo de la biblioteca.')
+
+        # Respaldo de seguridad ANTES de cualquier modificación destructiva
+        self.backup()
+
+        all_subtree_ids = self.col.decks.deck_and_child_ids(did)
+        deck_name = deck['name']
+
+        if keep_children:
+            # Desanidar submazos moviéndolos al nivel superior
+            prefix = deck_name + '::'
+            child_ids = [sub_id for sub_id in all_subtree_ids if sub_id != did]
+            parent_prefix = deck_name.rpartition('::')[0]
+
+            # Verificar colisiones de nombres antes de realizar cualquier cambio
+            target_renames = []
+            for sub_id in child_ids:
+                sub_deck = self.col.decks.get(sub_id)
+                relative_name = sub_deck['name'][len(prefix):]
+                new_sub_name = f"{parent_prefix}::{relative_name}" if parent_prefix else relative_name
+                existing = self.col.decks.id(new_sub_name, create=False)
+                if existing and existing != sub_id:
+                    raise ValueError(f'Ya existe un mazo llamado «{new_sub_name}» en el nivel superior.')
+                target_renames.append((sub_deck, new_sub_name))
+
+            for sub_deck, new_sub_name in target_renames:
+                self.col.decks.rename(sub_deck, new_sub_name)
+
+            # Eliminar solo el mazo/carpeta padre
+            card_rows = self.col.db.all("select id from cards where did = ?", (did,))
+            cids = {r['id'] for r in card_rows}
+            self.col.decks.remove([did])
+            if cids:
+                self.col.set_config('anki2.starred', sorted(self._stars() - cids))
+            self._active = None
+            if hasattr(self, '_study_blocks') and str(did) in self._study_blocks:
+                del self._study_blocks[str(did)]
+            return {
+                'id': did,
+                'name': deck_name,
+                'deletedDecks': 1,
+                'keptDecks': len(child_ids),
+                'deletedCards': len(cids)
+            }
+        else:
+            # Eliminar recursivamente todo el árbol de mazos y sus tarjetas
+            all_cids = set()
+            for sub_id in all_subtree_ids:
+                card_rows = self.col.db.all("select id from cards where did = ?", (sub_id,))
+                all_cids.update(r['id'] for r in card_rows)
+
+            self.col.decks.remove(all_subtree_ids)
+            if all_cids:
+                self.col.set_config('anki2.starred', sorted(self._stars() - all_cids))
+            self._active = None
+            if hasattr(self, '_study_blocks'):
+                for sub_id in all_subtree_ids:
+                    if str(sub_id) in self._study_blocks:
+                        del self._study_blocks[str(sub_id)]
+            return {
+                'id': did,
+                'name': deck_name,
+                'deletedDecks': len(all_subtree_ids),
+                'keptDecks': 0,
+                'deletedCards': len(all_cids)
+            }
+
     @staticmethod
     def _tags(tags: Any) -> List[str]:
         source = tags if isinstance(tags, (list, tuple, set)) else str(tags or '').replace(',', ' ').split()
@@ -2295,13 +2421,260 @@ class CleanEngine:
     def backup(self) -> Dict[str, Any]:
         return self.export_collection()
 
+    def get_study_block_info(self, deck_id: Any = None) -> Dict[str, Any]:
+        self._check_thread()
+        if deck_id not in (None, '', 'all', 0, '0'):
+            did = self._deck_id(deck_id)
+            dids = set(self.col.decks.deck_and_child_ids(did))
+        else:
+            dids = {d['id'] for d in self.col.decks.all()}
+        dids_str = ','.join(map(str, dids))
+        now = int(time.time())
+        today_days = (now - self.col.crt) // 86400
+
+        c_rows = self.col.db.all(f"""
+        select
+            count(*),
+            sum(queue = 0),
+            sum(queue = 1 and due <= ?),
+            sum(queue = 2 and due <= ?),
+            sum(queue = 1 and due > ?)
+        from cards where did in ({dids_str}) and queue not in (-1, -2, -3)
+        """, (now, today_days, now))
+
+        total_deck = c_rows[0][0] or 0 if c_rows else 0
+        new_c = c_rows[0][1] or 0 if c_rows else 0
+        learn_due = c_rows[0][2] or 0 if c_rows else 0
+        rev_due = c_rows[0][3] or 0 if c_rows else 0
+        learn_not_due = c_rows[0][4] or 0 if c_rows else 0
+        available_today = new_c + learn_due + rev_due
+
+        block_key = str(deck_id or 'all')
+        block = getattr(self, '_study_blocks', {}).get(block_key)
+        clean_block = None
+
+        if block:
+            selected_ids = list(block.get('selectedCardIds', []))
+            reviewed_ids = list(block.get('reviewedCardIds', []))
+            again_ids = list(block.get('againCardIds', []))
+
+            if selected_ids:
+                placeholders = ','.join('?' for _ in selected_ids)
+                existing_rows = self.col.db.all(f"select id, did, queue from cards where id in ({placeholders})", selected_ids)
+                existing_map = {r[0]: (r[1], r[2]) for r in existing_rows}
+
+                valid_selected = [cid for cid in selected_ids if cid in existing_map and existing_map[cid][0] in dids and existing_map[cid][1] not in (-1, -2, -3)]
+                valid_reviewed = [cid for cid in valid_selected if cid in reviewed_ids]
+                valid_again = [cid for cid in valid_selected if cid in again_ids]
+
+                if len(valid_selected) != len(selected_ids):
+                    block['selectedCardIds'] = valid_selected
+                    block['reviewedCardIds'] = valid_reviewed
+                    block['againCardIds'] = valid_again
+                    self._save_study_blocks()
+
+                pending_count = max(0, len(valid_selected) - len(valid_reviewed))
+                clean_block = {
+                    'deckId': block.get('deckId', block_key),
+                    'requestedLimit': block.get('requestedLimit'),
+                    'actualLimit': len(valid_selected),
+                    'total': len(valid_selected),
+                    'reviewedCount': len(valid_reviewed),
+                    'pendingCount': pending_count,
+                    'againCount': len(valid_again),
+                    'progressPct': round((len(valid_reviewed) / len(valid_selected) * 100)) if valid_selected else 100,
+                    'firstPassDone': pending_count == 0,
+                    'selectedCardIds': valid_selected,
+                    'reviewedCardIds': valid_reviewed,
+                    'againCardIds': valid_again,
+                    'explanation': block.get('explanation', '')
+                }
+
+        return {
+            'deckId': str(deck_id or 'all'),
+            'totalDeck': total_deck,
+            'totalDeckCards': total_deck,
+            'availableToday': available_today,
+            'hasActiveBlock': clean_block is not None,
+            'pendingNew': new_c,
+            'pendingLearn': learn_due,
+            'pendingDue': rev_due,
+            'learningNotDue': learn_not_due,
+            'unmaturedReviews': learn_not_due,
+            'activeBlock': clean_block
+        }
+
+    def start_study_block(self, deck_id: Any = None, limit: Any = 20) -> Dict[str, Any]:
+        self._check_thread()
+        if deck_id not in (None, '', 'all', 0, '0'):
+            did = self._deck_id(deck_id)
+            dids = set(self.col.decks.deck_and_child_ids(did))
+        else:
+            dids = {d['id'] for d in self.col.decks.all()}
+        dids_str = ','.join(map(str, dids))
+        now = int(time.time())
+        today_days = (now - self.col.crt) // 86400
+
+        query = f"""
+        select id from cards
+        where did in ({dids_str}) and queue not in (-1, -2, -3)
+        and (queue = 0 or (queue = 1 and due <= ?) or (queue = 2 and due <= ?))
+        order by
+            case
+                when queue = 1 then 1
+                when queue = 2 then 2
+                else 3
+            end,
+            due asc, id asc
+        """
+        rows = self.col.db.all(query, (now, today_days))
+        eligible_ids = [r[0] for r in rows]
+
+        if not eligible_ids:
+            not_due_c = self.col.db.first(f"select count(*) from cards where did in ({dids_str}) and queue = 1 and due > ?", (now,))[0]
+            explanation = "No hay tarjetas disponibles para hoy." if not not_due_c else f"Hay {not_due_c} tarjetas en repetición programadas para más tarde (aún no vencidas)."
+            return {'started': False, 'availableToday': 0, 'learningNotDue': not_due_c, 'explanation': explanation}
+
+        if str(limit).lower() == 'all':
+            req_limit = len(eligible_ids)
+        else:
+            try:
+                req_limit = max(1, int(limit))
+            except Exception:
+                req_limit = 20
+
+        actual_limit = min(req_limit, len(eligible_ids))
+        selected_ids = eligible_ids[:actual_limit]
+        explanation = ""
+        if actual_limit < req_limit:
+            explanation = f"Se seleccionaron las {actual_limit} tarjetas disponibles hoy (solicitaste {req_limit})."
+
+        block_key = str(deck_id or 'all')
+        if not hasattr(self, '_study_blocks'):
+            self._study_blocks = {}
+        self._study_blocks[block_key] = {
+            'deckId': block_key,
+            'requestedLimit': limit,
+            'actualLimit': actual_limit,
+            'selectedCardIds': selected_ids,
+            'reviewedCardIds': [],
+            'againCardIds': [],
+            'firstPassDone': False,
+            'created': now,
+            'updated': now,
+            'explanation': explanation
+        }
+        self._save_study_blocks()
+        return {
+            'saved': True,
+            'started': True,
+            'deckId': block_key,
+            'total': actual_limit,
+            'selectedCardIds': selected_ids,
+            'block': {
+                'total': actual_limit,
+                'pending': actual_limit,
+                'reviewedCount': 0
+            },
+            'explanation': explanation
+        }
+
+    def clear_study_block(self, deck_id: Any = None) -> Dict[str, Any]:
+        self._check_thread()
+        block_key = str(deck_id or 'all')
+        if hasattr(self, '_study_blocks') and block_key in self._study_blocks:
+            del self._study_blocks[block_key]
+            self._save_study_blocks()
+        return {'saved': True, 'cleared': True, 'deckId': block_key}
+
     def study(self, deck_id: Any = None) -> Dict[str, Any]:
         self._check_thread()
+        block_key = str(deck_id or 'all')
+        block = getattr(self, '_study_blocks', {}).get(block_key)
+
         if deck_id not in (None, '', 'all'):
             dids = [self._deck_id(deck_id)]
         else:
             dids = [d['id'] for d in self.col.decks.all() if d['id'] != 1] + [1]
 
+        intervals = ['< 1 min', '< 10 min', '1 día', '4 días']
+
+        # Si hay bloque activo, verificamos la siguiente tarjeta del bloque
+        if block and block.get('selectedCardIds'):
+            selected_ids = block['selectedCardIds']
+            reviewed_ids = set(block.get('reviewedCardIds', []))
+
+            placeholders = ','.join('?' for _ in selected_ids)
+            existing_rows = self.col.db.all(f"select id from cards where id in ({placeholders}) and queue not in (-1, -2, -3)", selected_ids)
+            valid_set = {r[0] for r in existing_rows}
+            clean_selected = [cid for cid in selected_ids if cid in valid_set]
+            if len(clean_selected) != len(selected_ids):
+                block['selectedCardIds'] = clean_selected
+                self._save_study_blocks()
+
+            next_cid = None
+            for cid in clean_selected:
+                if cid not in reviewed_ids:
+                    next_cid = cid
+                    break
+
+            total = len(clean_selected)
+            reviewed_count = len([cid for cid in clean_selected if cid in reviewed_ids])
+            pending_count = max(0, total - reviewed_count)
+
+            if next_cid is not None:
+                card = self.col.get_card(next_cid)
+                self.col._active_deck_id = card.did
+                due_ids = set(self.col.find_cards('(is:due OR is:new) -is:suspended -is:buried'))
+                stars = self._stars()
+                self._active = card
+                block_status = {
+                    'active': True,
+                    'current': reviewed_count + 1,
+                    'total': total,
+                    'pending': pending_count,
+                    'reviewedCount': reviewed_count,
+                    'progressPct': round((reviewed_count / total) * 100) if total else 0,
+                    'firstPassDone': False,
+                    'againCount': len(block.get('againCardIds', []))
+                }
+                return {
+                    'cards': [self._card_data(card, due_ids, stars)],
+                    'counts': {'new': 0, 'learning': 0, 'review': pending_count, 'total': pending_count},
+                    'deckId': card.did,
+                    'intervals': intervals,
+                    'finished': False,
+                    'blockStatus': block_status
+                }
+            else:
+                self._active = None
+                block['firstPassDone'] = True
+                self._save_study_blocks()
+                now = int(time.time())
+                again_ids = block.get('againCardIds', [])
+                again_due = [cid for cid in again_ids if self.col.get_card(cid).due <= now]
+                block_status = {
+                    'active': True,
+                    'current': total,
+                    'total': total,
+                    'pending': 0,
+                    'reviewedCount': total,
+                    'progressPct': 100,
+                    'firstPassDone': True,
+                    'againCount': len(again_ids),
+                    'againDueCount': len(again_due)
+                }
+                return {
+                    'cards': [],
+                    'counts': {'new': 0, 'learning': 0, 'review': 0, 'total': 0},
+                    'deckId': dids[0] if dids else 1,
+                    'intervals': intervals,
+                    'finished': True,
+                    'firstPassDone': True,
+                    'blockStatus': block_status
+                }
+
+        # Comportamiento normal sin bloque
         queue = None
         selected = None
         for did in dids:
@@ -2312,7 +2685,6 @@ class CleanEngine:
                 break
 
         cards = []
-        intervals = ['< 1 min', '< 10 min', '1 día', '4 días']
         if queue and queue.cards:
             due_ids = set(self.col.find_cards('(is:due OR is:new) -is:suspended -is:buried'))
             stars = self._stars()
@@ -2339,7 +2711,39 @@ class CleanEngine:
         card = self._active
         self.col.sched.answerCard(card, rating)
         self._active = None
-        return {'card': self._card_data(card), 'saved': True}
+
+        block_status = None
+        cid = card.id
+        for bkey, block in getattr(self, '_study_blocks', {}).items():
+            if cid in block.get('selectedCardIds', []):
+                reviewed = block.setdefault('reviewedCardIds', [])
+                if cid not in reviewed:
+                    reviewed.append(cid)
+                if rating == 1:
+                    again = block.setdefault('againCardIds', [])
+                    if cid not in again:
+                        again.append(cid)
+                block['updated'] = int(time.time())
+                total = len(block['selectedCardIds'])
+                pending = max(0, total - len(reviewed))
+                if pending == 0:
+                    block['firstPassDone'] = True
+                self._save_study_blocks()
+                block_status = {
+                    'active': True,
+                    'total': total,
+                    'reviewedCount': len(reviewed),
+                    'pending': pending,
+                    'againCount': len(block.get('againCardIds', [])),
+                    'progressPct': round((len(reviewed) / total) * 100) if total else 100,
+                    'firstPassDone': pending == 0
+                }
+                break
+
+        res = {'card': self._card_data(card), 'saved': True}
+        if block_status:
+            res['blockStatus'] = block_status
+        return res
 
     def start_exam(self, deck_id: Any = None, mode: str = 'difficult', limit: int = 20) -> Dict[str, Any]:
         self._check_thread()

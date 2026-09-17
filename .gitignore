@@ -17,3 +17,4 @@ tools/practice-ui-session.json
 .obsidian/workspace-mobile.json
 .obsidian/cache/
 /*.dll
+tests/screenshots_*/

@@ -1,7 +1,7 @@
 ---
 aliases: [Cerebro de Lumcards, Inicio]
 tags: [lumcards, indice]
-updated: 2026-09-15
+updated: 2026-09-17
 ---
 
 # Cerebro de Lumcards
@@ -27,7 +27,7 @@ updated: 2026-09-15
 - [[06_LEGAL|Licencias y comercialización]] — riesgos y documentación fuente.
 - [[07_PROTOCOL|Protocolo compartido]] — checkpoints, interrupciones y trabajo entre agentes.
 - [[10_AGENT_CAPABILITIES|Capacidades de agentes]] — skills, MCP, límites y cuándo pedir herramientas nuevas.
-- [[tasks/2026-09-15-1307-antigravity-subir-github-desplegar-vercel|Última tarea documentada]] — subida a GitHub y despliegue en Vercel.
+- [[tasks/2026-09-17-codex-csp-responsive]] — reparación de CSP del iframe, audio real probado en Chromium y visor adaptable; versión local 20260917-csp.
 
 ## Regla de uso
 

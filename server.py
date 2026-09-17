@@ -105,6 +105,9 @@ class Handler(BaseHTTPRequestHandler):
                 deck_id = query.get('deckId', [None])[0]
                 year = query.get('year', [None])[0]
                 self.json(self.engine.get_detailed_stats(deck_id=deck_id, year=year))
+            elif route == '/api/study/block-info':
+                deck_id = query.get('deckId', [None])[0]
+                self.json(self.engine.get_study_block_info(deck_id))
             elif route == '/api/cards':
                 self.json(self.engine.browse_cards(query=query.get('query', [''])[0], deck_id=query.get('deckId', [None])[0], starred=query.get('starred', ['0'])[0] == '1', offset=int(query.get('offset', ['0'])[0]), limit=int(query.get('limit', ['50'])[0])))
             elif route == '/api/cards/weak':
@@ -153,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not path.is_relative_to(vendor):
                     raise ValueError('Archivo de aplicación no válido.')
                 self.file(path)
-            elif route in ('/', '/index.html', '/app.js', '/app.css', '/student.css', '/icon.svg',
+            elif route in ('/', '/index.html', '/app.js', '/card-runtime.js', '/app.css', '/student.css', '/icon.svg',
                            '/practice.html', '/practice.css', '/practice.js', '/study-games.js', '/sync-manager.js'):
                 self.file(ROOT / 'dist' / ('index.html' if route == '/' else route[1:]))
             else:
@@ -277,6 +280,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.engine.toggle_star(body.get('id'))
             elif route == '/api/study':
                 result = self.engine.study(body.get('deckId'))
+            elif route == '/api/study/block-start':
+                result = self.engine.start_study_block(body.get('deckId'), body.get('limit', 20))
+            elif route == '/api/study/block-clear':
+                result = self.engine.clear_study_block(body.get('deckId'))
             elif route == '/api/exam/start':
                 result = self.engine.start_exam(body.get('deckId'), body.get('mode', 'difficult'), body.get('limit', 20))
             elif route == '/api/cards/image-occlusion':
@@ -316,16 +323,12 @@ class Handler(BaseHTTPRequestHandler):
                 kind = body.get('type')
                 if kind not in ('deck', 'card'):
                     raise ValueError('Selecciona qué deseas eliminar.')
-                self.engine.backup()
                 if kind == 'card':
+                    self.engine.backup()
                     result = self.engine.delete_card(body.get('id'))
                 else:
-                    did = self.engine._deck_id(body.get('id'))
-                    ids = set(self.engine.col.find_cards(f'did:{did}'))
-                    self.engine.col.decks.remove([did])
-                    self.engine.col.set_config('anki2.starred', sorted(self.engine._stars() - ids))
-                    self.engine._active = None
-                    result = {'deleted': len(ids)}
+                    keep_children = bool(body.get('keepChildren', False))
+                    result = self.engine.delete_deck(body.get('id'), keep_children=keep_children)
             else:
                 self.json({'error': 'La operación no existe.'}, 404)
                 return

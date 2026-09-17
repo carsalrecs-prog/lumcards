@@ -14,6 +14,20 @@
     choice: 'Elegir'
   };
 
+  try {
+    const currentTheme = localStorage.getItem('anki2-theme') || 'light';
+    document.documentElement.classList.toggle('dark', currentTheme === 'dark');
+  } catch (_) {}
+
+  function syncStudioTheme() {
+    const toggle = document.querySelector('.studio-theme-toggle');
+    if (!toggle) return;
+    const dark = document.documentElement.classList.contains('dark');
+    toggle.setAttribute('aria-pressed', String(dark));
+    const label = toggle.querySelector('[data-theme-label]');
+    if (label) label.textContent = dark ? 'Modo claro' : 'Modo oscuro';
+  }
+
   // ── Confetti Particle Engine (Zero-Dependencies) ───────────
   const Confetti = {
     canvas: null,
@@ -24,8 +38,16 @@
       this.canvas = document.getElementById('confetti-canvas');
       if (this.canvas) this.ctx = this.canvas.getContext('2d');
     },
-    burst(count = 75) {
+    stop() {
+      if (this.animId) cancelAnimationFrame(this.animId);
+      this.animId = null;
+      this.particles = [];
+      if (this.ctx && this.canvas) this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    },
+    burst(count = 24) {
       if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+      this.stop();
+      count = Math.min(count, 24);
       this.init();
       if (!this.canvas || !this.ctx) return;
       this.canvas.width = window.innerWidth;
@@ -42,7 +64,7 @@
           rotation: Math.random() * 360,
           vrot: (Math.random() - 0.5) * 14,
           alpha: 1.0,
-          decay: Math.random() * 0.016 + 0.008
+          decay: Math.random() * 0.012 + 0.028
         });
       }
       if (!this.animId) this.loop();
@@ -79,29 +101,52 @@
     }
   };
 
+  window.addEventListener('pagehide', () => Confetti.stop());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) Confetti.stop(); });
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener?.('change', event => {
+    if (event.matches) Confetti.stop();
+  });
+
   // ── Reproductor de Audio Nativo para Mazos Anki ─────────────
   const AudioPlayer = {
     currentAudio: null,
+    currentBtn: null,
     play(url, btn) {
       if (!url) return;
       try {
         if (this.currentAudio) {
-          this.currentAudio.pause();
+          const prevAudio = this.currentAudio;
+          const prevBtn = this.currentBtn;
           this.currentAudio = null;
+          this.currentBtn = null;
+          try {
+            prevAudio.pause();
+            prevAudio.currentTime = 0;
+          } catch (_) {}
+          if (prevBtn) prevBtn.classList.remove('playing');
         }
         const audio = new Audio(url);
         this.currentAudio = audio;
+        this.currentBtn = btn || null;
         if (btn) btn.classList.add('playing');
-        audio.play().catch(() => {});
-        audio.onended = () => {
-          if (btn) btn.classList.remove('playing');
+        const cleanup = () => {
+          if (this.currentAudio !== audio) return;
+          if (this.currentBtn) this.currentBtn.classList.remove('playing');
           this.currentAudio = null;
+          this.currentBtn = null;
         };
-        audio.onerror = () => {
-          if (btn) btn.classList.remove('playing');
-          this.currentAudio = null;
-        };
-      } catch (_) {}
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
+        const p = audio.play();
+        if (p !== undefined) {
+          p.catch(err => {
+            console.warn('Audio play rejected:', err);
+            cleanup();
+          });
+        }
+      } catch (err) {
+        console.warn('AudioPlayer error:', err);
+      }
     }
   };
 
@@ -238,7 +283,13 @@
     historyLoading: false,
     historyError: '',
     pending: [],
-    matchTimerInterval: null
+    matchTimerInterval: null,
+    explorer: {
+      open: false,
+      currentFolder: '',
+      searchQuery: '',
+      lastTriggerEl: null
+    }
   };
 
   const input = {
@@ -253,7 +304,10 @@
     deckId: '',
     newDeck: '',
     message: '',
-    error: ''
+    error: '',
+    previewIndex: 0,
+    previewFlipped: false,
+    mobileTab: 'table'
   };
 
   const pendingKey = 'anki2-practice-pending-v2';
@@ -282,6 +336,16 @@
 
   const text = (tag, value, className) => node(tag, { text: value, className: className || '' });
   const button = (label, action, props) => node('button', { type: 'button', className: 'btn', 'data-action': action, text: label, ...props });
+  const speakerIconSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';
+  const audioButton = (audioUrl, label = 'Reproducir audio') => node('button', {
+    type: 'button',
+    className: 'game-audio-pill',
+    'data-action': 'play-audio',
+    'data-audio': audioUrl,
+    'aria-label': label,
+    title: label,
+    html: speakerIconSvg
+  });
   function field(label, control) { return node('label', { className: 'field' }, [text('span', label), control]); }
   function say(message, error) { status.textContent = message || ''; status.classList.toggle('error', Boolean(error)); }
   function focus(selector) { requestAnimationFrame(() => content.querySelector(selector)?.focus()); }
@@ -323,10 +387,42 @@
               return { decks: store.decks || [], isWebMode: true };
             }
             if (path.includes('/api/exam/start')) {
-              const deckId = body?.deckId;
+              let targetDeckId = body?.deckId;
+              if (typeof targetDeckId === 'string' && targetDeckId.startsWith('folder:')) {
+                targetDeckId = targetDeckId.slice(7);
+              }
               let list = store.cards || [];
-              if (deckId && deckId !== 'all') list = list.filter(c => String(c.deckId) === String(deckId));
-              return { cards: list.slice(0, 200) };
+              if (targetDeckId && targetDeckId !== 'all') {
+                const targetDeckIds = new Set();
+                const selectedDeck = (store.decks || []).find(d => String(d.id) === String(targetDeckId) || d.name === targetDeckId);
+                if (selectedDeck) {
+                  targetDeckIds.add(String(selectedDeck.id));
+                  if (Array.isArray(selectedDeck.childIds)) {
+                    selectedDeck.childIds.forEach(cid => targetDeckIds.add(String(cid)));
+                  }
+                  if (selectedDeck.name) {
+                    const prefix = selectedDeck.name + '::';
+                    (store.decks || []).forEach(d => {
+                      if (d.name && (d.name === selectedDeck.name || d.name.startsWith(prefix))) {
+                        targetDeckIds.add(String(d.id));
+                      }
+                    });
+                  }
+                } else {
+                  targetDeckIds.add(String(targetDeckId));
+                }
+                list = list.filter(c => targetDeckIds.has(String(c.deckId)));
+              }
+              const seenCardIds = new Set();
+              const uniqueCards = [];
+              for (const c of list) {
+                const cid = c.id != null ? String(c.id) : (c.noteId != null ? String(c.noteId) : JSON.stringify(c));
+                if (!seenCardIds.has(cid)) {
+                  seenCardIds.add(cid);
+                  uniqueCards.push(c);
+                }
+              }
+              return { cards: uniqueCards.slice(0, 200) };
             }
           }
         } catch (_) {}
@@ -537,27 +633,467 @@
     return copy;
   }
 
+  // ── Jerarquía y Enriquecimiento de Mazos y Carpetas ──────────
+  function enrichDecks(rawDecks) {
+    const list = Array.isArray(rawDecks) ? rawDecks : [];
+    return list.map(d => {
+      const name = String(d.name || '');
+      const parts = name.split('::');
+      const shortName = d.shortName || parts[parts.length - 1] || name;
+      const parentName = d.parentName !== undefined ? d.parentName : (parts.length > 1 ? parts.slice(0, -1).join('::') : '');
+      const level = d.level !== undefined ? d.level : (parts.length - 1);
+      const hasChildren = (Array.isArray(d.childIds) && d.childIds.length > 1) ||
+        list.some(other => other !== d && other.name && other.name.startsWith(name + '::'));
+      const isFolder = Boolean(d.isFolder || hasChildren);
+
+      return {
+        ...d,
+        id: d.id,
+        name,
+        shortName,
+        parentName,
+        level,
+        isFolder,
+        total: Number(d.total) || 0
+      };
+    });
+  }
+
+  function getHierarchicalStructure(rawDecks) {
+    const decks = enrichDecks(rawDecks);
+    const deckByName = new Map();
+    decks.forEach(d => deckByName.set(d.name, d));
+
+    // Descubrir todas las rutas intermedias de carpetas ausentes
+    const allPaths = new Set();
+    decks.forEach(d => {
+      const parts = d.name.split('::');
+      for (let i = 1; i < parts.length; i++) {
+        allPaths.add(parts.slice(0, i).join('::'));
+      }
+    });
+
+    const allItems = [...decks];
+    allPaths.forEach(folderPath => {
+      if (!deckByName.has(folderPath)) {
+        const parts = folderPath.split('::');
+        const parentName = parts.length > 1 ? parts.slice(0, -1).join('::') : '';
+        const shortName = parts[parts.length - 1];
+        const prefix = folderPath + '::';
+        const descendants = decks.filter(d => d.name === folderPath || d.name.startsWith(prefix));
+        const roots = descendants.filter(d => !descendants.some(other => other !== d && d.name.startsWith(other.name + '::')));
+        const totalCards = roots.reduce((sum, d) => sum + (d.total || 0), 0);
+        const virtualFolder = {
+          id: 'folder:' + folderPath,
+          name: folderPath,
+          shortName,
+          parentName,
+          level: parts.length - 1,
+          isFolder: true,
+          isVirtual: true,
+          total: totalCards,
+          childIds: descendants.map(d => d.id)
+        };
+        allItems.push(virtualFolder);
+        deckByName.set(folderPath, virtualFolder);
+      }
+    });
+
+    return { allItems, deckByName };
+  }
+
+  function openExplorer(triggerEl) {
+    state.explorer.lastTriggerEl = triggerEl || document.activeElement;
+    state.explorer.open = true;
+    state.explorer.searchQuery = '';
+    if (state.deckId && state.deckId !== 'all') {
+      const { allItems } = getHierarchicalStructure(state.decks);
+      const sel = allItems.find(d => String(d.id) === String(state.deckId));
+      if (sel) {
+        state.explorer.currentFolder = sel.isFolder ? sel.name : (sel.parentName || '');
+      } else {
+        state.explorer.currentFolder = '';
+      }
+    } else {
+      state.explorer.currentFolder = '';
+    }
+    renderDeckExplorerDialog();
+    requestAnimationFrame(() => {
+      const inp = document.querySelector('#explorer-search-input');
+      if (inp) inp.focus();
+    });
+  }
+
+  function closeExplorer() {
+    state.explorer.open = false;
+    const dlg = document.querySelector('#deck-explorer-dialog');
+    if (dlg) dlg.remove();
+    if (state.explorer.lastTriggerEl && typeof state.explorer.lastTriggerEl.focus === 'function') {
+      state.explorer.lastTriggerEl.focus();
+    }
+  }
+
+  function renderDeckExplorerDialog() {
+    const { allItems } = getHierarchicalStructure(state.decks);
+    const roots = state.decks.filter(d => !state.decks.some(other => other !== d && other.name && d.name?.startsWith(other.name + '::')));
+    const totalLibraryCards = roots.reduce((sum, d) => sum + (d.total || 0), 0);
+
+    let dlg = document.querySelector('#deck-explorer-dialog');
+    let isInitial = false;
+
+    if (!dlg) {
+      isInitial = true;
+      dlg = node('dialog', {
+        id: 'deck-explorer-dialog',
+        className: 'deck-explorer-modal',
+        'aria-labelledby': 'explorer-dialog-title'
+      });
+
+      const head = node('div', { className: 'explorer-head' }, [
+        node('div', {}, [
+          node('h2', { id: 'explorer-dialog-title', text: 'Explorar mazos y carpetas' }),
+          node('p', { text: 'Navega por las carpetas o busca por nombre para elegir el contenido a practicar.' })
+        ]),
+        button('✕', 'close-deck-explorer', { className: 'btn btn-quiet explorer-close-btn', 'aria-label': 'Cerrar explorador' })
+      ]);
+
+      const searchInput = node('input', {
+        id: 'explorer-search-input',
+        className: 'explorer-search-input',
+        type: 'search',
+        placeholder: 'Buscar mazo o carpeta por nombre…',
+        value: state.explorer.searchQuery,
+        autocomplete: 'off'
+      });
+
+      const clearBtn = button('✕', 'clear-explorer-search', {
+        id: 'explorer-clear-btn',
+        className: 'btn btn-quiet explorer-search-clear',
+        'aria-label': 'Limpiar búsqueda',
+        style: state.explorer.searchQuery ? '' : 'display:none;'
+      });
+
+      const searchWrap = node('div', { className: 'explorer-search-input-wrap' }, [
+        text('span', '🔍', 'explorer-search-icon'),
+        searchInput,
+        clearBtn
+      ]);
+
+      const searchBar = node('div', { className: 'explorer-search-bar' }, [searchWrap]);
+      const navBarSlot = node('div', { id: 'explorer-nav-slot' });
+      const heroSlot = node('div', { id: 'explorer-hero-slot' });
+      const bodyScrollSlot = node('div', { id: 'explorer-body-slot', className: 'explorer-body-scroll' });
+      const foot = node('div', { className: 'explorer-foot' }, [
+        button('Cerrar', 'close-deck-explorer', { className: 'btn btn-quiet' })
+      ]);
+
+      dlg.append(head, searchBar, navBarSlot, heroSlot, bodyScrollSlot, foot);
+
+      // Outside click on backdrop
+      dlg.addEventListener('click', e => {
+        const rect = dlg.getBoundingClientRect();
+        const isInDialog = (
+          rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
+          rect.left <= e.clientX && e.clientX <= rect.left + rect.width
+        );
+        if (!isInDialog) {
+          closeExplorer();
+        }
+      });
+
+      dlg.addEventListener('cancel', e => {
+        e.preventDefault();
+        closeExplorer();
+      });
+
+      content.append(dlg);
+
+      try {
+        if (typeof dlg.showModal === 'function') {
+          dlg.showModal();
+        } else {
+          dlg.setAttribute('open', '');
+        }
+      } catch (_) {
+        dlg.setAttribute('open', '');
+      }
+    }
+
+    // Dynamic slot updates
+    const navBarSlot = dlg.querySelector('#explorer-nav-slot');
+    const heroSlot = dlg.querySelector('#explorer-hero-slot');
+    const bodyScrollSlot = dlg.querySelector('#explorer-body-slot');
+    const clearBtn = dlg.querySelector('#explorer-clear-btn');
+    if (clearBtn) clearBtn.style.display = state.explorer.searchQuery ? '' : 'none';
+
+    const isSearching = Boolean(state.explorer.searchQuery.trim());
+
+    if (isSearching) {
+      if (navBarSlot) navBarSlot.replaceChildren();
+      if (heroSlot) heroSlot.replaceChildren();
+
+      const q = state.explorer.searchQuery.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const filtered = allItems.filter(item => {
+        const nameNorm = item.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return nameNorm.includes(q);
+      });
+
+      const listNodes = [text('div', `RESULTADOS DE BÚSQUEDA (${filtered.length})`, 'explorer-section-title')];
+
+      if (filtered.length === 0) {
+        listNodes.push(node('div', { className: 'explorer-empty-msg' }, [
+          document.createTextNode(`No se encontraron mazos ni carpetas que coincidan con "${state.explorer.searchQuery}".`)
+        ]));
+      } else {
+        const list = node('div', { className: 'explorer-list' });
+        filtered.forEach(item => {
+          const isSelected = String(state.deckId) === String(item.id);
+          const fullPath = item.name.split('::').join(' ➔ ');
+          const row = node('div', { className: 'explorer-row' + (isSelected ? ' active-selection' : '') }, [
+            node('div', {
+              className: 'explorer-row-lead',
+              'data-action': item.isFolder ? 'explore-folder' : 'select-deck-or-folder',
+              'data-folder': item.isFolder ? item.name : undefined,
+              'data-deck-id': item.id,
+              role: 'button',
+              tabIndex: 0
+            }, [
+              text('span', item.isFolder ? '📁' : '🎴', 'explorer-row-icon'),
+              node('div', { className: 'explorer-row-texts' }, [
+                text('div', item.shortName, 'explorer-row-name'),
+                text('div', fullPath, 'explorer-row-path')
+              ])
+            ]),
+            node('div', { className: 'explorer-row-actions' }, [
+              text('span', `${item.total || 0} tarjetas`, 'explorer-tag-count'),
+              item.isFolder ? button('Abrir ➔', 'explore-folder', { className: 'btn btn-quiet', 'data-folder': item.name }) : null,
+              button(isSelected ? '✓ Elegido' : 'Elegir', 'select-deck-or-folder', {
+                className: `btn ${isSelected ? 'btn-primary' : 'btn-quiet'}`,
+                'data-deck-id': item.id,
+                title: item.isFolder ? 'Elegir toda la carpeta y sus submazos' : 'Elegir este mazo'
+              })
+            ].filter(Boolean))
+          ]);
+          list.append(row);
+        });
+        listNodes.push(list);
+      }
+      if (bodyScrollSlot) bodyScrollSlot.replaceChildren(...listNodes);
+    } else {
+      const current = state.explorer.currentFolder;
+      const crumbs = [];
+
+      if (current) {
+        crumbs.push(button('🏠 Raíz', 'explore-folder', { className: 'btn btn-quiet explorer-crumb-btn', 'data-folder': '' }));
+      } else {
+        crumbs.push(text('span', '🏠 Raíz', 'explorer-crumb-current'));
+      }
+
+      if (current) {
+        const parts = current.split('::');
+        let accumulated = '';
+        parts.forEach((p, idx) => {
+          accumulated = accumulated ? `${accumulated}::${p}` : p;
+          crumbs.push(text('span', ' / ', 'explorer-crumb-sep'));
+          if (idx === parts.length - 1) {
+            crumbs.push(text('span', p, 'explorer-crumb-current'));
+          } else {
+            crumbs.push(button(p, 'explore-folder', { className: 'btn btn-quiet explorer-crumb-btn', 'data-folder': accumulated }));
+          }
+        });
+      }
+
+      let backBtn = null;
+      if (current) {
+        const parts = current.split('::');
+        const parentFolder = parts.length > 1 ? parts.slice(0, -1).join('::') : '';
+        backBtn = button('⬅ Volver', 'explore-folder', { className: 'btn btn-quiet explorer-back-btn', 'data-folder': parentFolder });
+      }
+
+      const navBar = node('div', { className: 'explorer-nav-bar' }, [
+        node('div', { className: 'explorer-breadcrumbs' }, crumbs),
+        backBtn
+      ].filter(Boolean));
+
+      if (navBarSlot) navBarSlot.replaceChildren(navBar);
+
+      // Hero banner: "Elegir toda esta carpeta"
+      if (current) {
+        const currentFolderObj = allItems.find(d => d.name === current) || {
+          id: 'folder:' + current,
+          shortName: current.split('::').pop(),
+          total: 0
+        };
+        const hero = node('div', { className: 'explorer-folder-hero' }, [
+          node('div', { className: 'explorer-folder-hero-info' }, [
+            node('strong', {}, [document.createTextNode(`📁 ${currentFolderObj.shortName}`)]),
+            text('span', `Incluye sus submazos (${currentFolderObj.total || 0} tarjetas en total)`)
+          ]),
+          button('Elegir toda esta carpeta', 'select-deck-or-folder', {
+            className: 'btn btn-primary explorer-hero-btn',
+            'data-deck-id': currentFolderObj.id,
+            'aria-label': `Elegir toda la carpeta ${currentFolderObj.shortName} incluyendo submazos`
+          })
+        ]);
+        if (heroSlot) heroSlot.replaceChildren(hero);
+      } else {
+        if (heroSlot) heroSlot.replaceChildren();
+      }
+
+      // Body list
+      const listNodes = [];
+      if (!current) {
+        const isAllSelected = state.deckId === 'all';
+        const allRow = node('div', { className: 'explorer-row' + (isAllSelected ? ' active-selection' : '') }, [
+          node('div', { className: 'explorer-row-lead', 'data-action': 'select-deck-or-folder', 'data-deck-id': 'all', role: 'button', tabIndex: 0 }, [
+            text('span', '🌐', 'explorer-row-icon'),
+            node('div', { className: 'explorer-row-texts' }, [
+              text('div', 'Todos mis mazos', 'explorer-row-name'),
+              text('div', 'Toda tu colección de tarjetas', 'explorer-row-path')
+            ])
+          ]),
+          node('div', { className: 'explorer-row-actions' }, [
+            text('span', `${totalLibraryCards} tarjetas`, 'explorer-tag-count'),
+            button(isAllSelected ? '✓ Seleccionado' : 'Elegir', 'select-deck-or-folder', {
+              className: `btn ${isAllSelected ? 'btn-primary' : 'btn-quiet'}`,
+              'data-deck-id': 'all'
+            })
+          ])
+        ]);
+        listNodes.push(allRow);
+        listNodes.push(text('div', 'CARPETAS Y MAZOS PRINCIPALES', 'explorer-section-title'));
+      } else {
+        listNodes.push(text('div', 'CONTENIDO DE ESTA CARPETA', 'explorer-section-title'));
+      }
+
+      const directChildren = allItems.filter(item => item.parentName === current);
+      directChildren.sort((a, b) => {
+        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        return a.shortName.localeCompare(b.shortName);
+      });
+
+      if (directChildren.length === 0) {
+        listNodes.push(node('div', { className: 'explorer-empty-msg' }, [
+          document.createTextNode('Esta carpeta no contiene submazos ni tarjetas adicionales.')
+        ]));
+      } else {
+        const list = node('div', { className: 'explorer-list' });
+        directChildren.forEach(child => {
+          const isSelected = String(state.deckId) === String(child.id);
+          const row = node('div', { className: 'explorer-row' + (isSelected ? ' active-selection' : '') }, [
+            node('div', {
+              className: 'explorer-row-lead',
+              'data-action': child.isFolder ? 'explore-folder' : 'select-deck-or-folder',
+              'data-folder': child.isFolder ? child.name : undefined,
+              'data-deck-id': child.id,
+              role: 'button',
+              tabIndex: 0
+            }, [
+              text('span', child.isFolder ? '📁' : '🎴', 'explorer-row-icon'),
+              node('div', { className: 'explorer-row-texts' }, [
+                text('div', child.shortName, 'explorer-row-name'),
+                text('div', child.isFolder ? 'Carpeta con submazos' : child.name, 'explorer-row-path')
+              ])
+            ]),
+            node('div', { className: 'explorer-row-actions' }, [
+              text('span', `${child.total || 0} tarjetas`, 'explorer-tag-count'),
+              child.isFolder ? button('Abrir ➔', 'explore-folder', { className: 'btn btn-quiet', 'data-folder': child.name, 'aria-label': `Abrir carpeta ${child.shortName}` }) : null,
+              button(isSelected ? '✓ Elegido' : 'Elegir', 'select-deck-or-folder', {
+                className: `btn ${isSelected ? 'btn-primary' : 'btn-quiet'}`,
+                'data-deck-id': child.id,
+                title: child.isFolder ? 'Elegir toda la carpeta y sus submazos' : 'Elegir este mazo'
+              })
+            ].filter(Boolean))
+          ]);
+          list.append(row);
+        });
+        listNodes.push(list);
+      }
+      if (bodyScrollSlot) bodyScrollSlot.replaceChildren(...listNodes);
+    }
+
+    if (isInitial) {
+      requestAnimationFrame(() => {
+        const searchInput = dlg.querySelector('#explorer-search-input');
+        if (searchInput) searchInput.focus();
+      });
+    }
+  }
+
   // ── Render Pantalla Principal (Suite de Juegos) ───────────────
   function renderHome() {
     if (state.matchTimerInterval) { clearInterval(state.matchTimerInterval); state.matchTimerInterval = null; }
 
     const hero = node('section', { className: 'play-hero' }, [
-      node('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px' }, [
-        text('span', 'APRENDE PRACTICANDO', 'play-eyebrow'),
-        node('div', { style: 'display:flex;gap:8px;align-items:center' }, [
-          button(SoundFX.enabled ? '🔊 Sonido: Activado' : '🔇 Sonido: Silenciado', 'toggle-sound', { className: 'btn btn-quiet', style: 'font-size:12.5px;padding:6px 12px' }),
-          button('⚙️ Opciones de estudio', 'study-options', { className: 'btn btn-quiet', style: 'font-size:12.5px;padding:6px 12px' })
+      node('div', { className: 'studio-hero-top' }, [
+        text('span', 'TU ESPACIO DE PRÁCTICA', 'play-eyebrow'),
+        node('div', { className: 'studio-hero-tools' }, [
+          button(SoundFX.enabled ? 'Sonido activado' : 'Sonido silenciado', 'toggle-sound', { className: 'btn btn-quiet', 'aria-pressed': String(SoundFX.enabled) }),
+          button('Opciones de estudio', 'study-options', { className: 'btn btn-quiet' })
         ])
       ]),
-      text('h1', 'Otra forma de aprender.'),
-      text('p', 'Elige tus tarjetas y una actividad. Una sesión corta también cuenta.')
+      text('h1', 'Aprender también puede ser un juego.'),
+      text('p', 'Elige tu contenido. Encuentra tu ritmo.')
     ]);
 
-    const settings = node('div', { className: 'play-settings' }, [
-      field('Tu mazo', deckSelect('practice-deck', state.deckId, true, false, state.loading)),
-      field('Tarjetas por sesión', node('select', { id: 'practice-size', disabled: state.loading }, [5, 10, 20, 30, 50].map(size => node('option', { value: size, text: size + ' tarjetas', selected: state.size === size })))),
+    // Resumen del contenido seleccionado actualmente
+    const { allItems } = getHierarchicalStructure(state.decks);
+    // Deck totals include descendants: sum disjoint roots, not leaves (parents may own cards).
+    const roots = state.decks.filter(d => !state.decks.some(other => other !== d && other.name && d.name?.startsWith(other.name + '::')));
+    const totalLibraryCards = roots.reduce((sum, d) => sum + (d.total || 0), 0);
 
+    let selectedTitle = 'Todos mis mazos';
+    let selectedPath = 'Colección completa';
+    let selectedBadge = 'Biblioteca completa';
+    let selectedCount = totalLibraryCards;
+    let isFolder = false;
+
+    if (state.deckId !== 'all') {
+      const target = allItems.find(d => String(d.id) === String(state.deckId));
+      if (target) {
+        selectedTitle = target.shortName || target.name;
+        selectedPath = target.name.split('::').join(' ➔ ');
+        selectedCount = target.total || 0;
+        isFolder = Boolean(target.isFolder);
+        selectedBadge = isFolder ? 'Carpeta y submazos' : 'Mazo individual';
+      }
+    }
+
+    const selectorCard = node('button', {
+      type: 'button',
+      className: 'play-selector-card',
+      'aria-haspopup': 'dialog',
+      'aria-label': `Mazo o carpeta seleccionada: ${selectedTitle}. Clic para cambiar selección`,
+      'data-action': 'open-deck-explorer'
+    }, [
+      node('span', { className: 'studio-folder-art', 'aria-hidden': 'true' }),
+      node('span', { className: 'play-selector-main' }, [
+        node('span', { className: 'play-selector-badge-row' }, [
+          text('span', selectedBadge, 'play-selector-badge')
+        ]),
+        text('span', selectedTitle, 'play-selector-title'),
+        text('span', selectedPath, 'play-selector-path'),
+        node('span', { className: 'play-selector-meta' }, [
+          node('span', {}, [node('strong', {}, [String(selectedCount)]), document.createTextNode(' tarjetas en total')]),
+          isFolder ? text('span', '· Incluye submazos') : null
+        ].filter(Boolean))
+      ]),
+      text('span', 'Cambiar ↗', 'play-selector-btn')
     ]);
+
+    const step1 = node('div', { className: 'studio-content-setting' }, [
+      text('span', '01 · QUÉ VAS A PRACTICAR', 'play-step-label'),
+      selectorCard
+    ]);
+
+    const step2 = node('div', { className: 'studio-size-setting' }, [
+      text('span', '02 · TU RITMO', 'play-step-label'),
+      node('div', { className: 'studio-size-inner' }, [
+        field('Tarjetas por sesión', node('select', { id: 'practice-size', disabled: state.loading }, [5, 10, 20, 30, 50].map(size => node('option', { value: size, text: size + ' tarjetas', selected: state.size === size }))))
+      ])
+    ]);
+
+    const configGrid = node('div', { className: 'play-config-grid' }, [step1, step2]);
 
     const modes = [
       ['learn', '🧠', 'Aprender', 'Avanza paso a paso y vuelve a practicar lo que más te cuesta.', 'Paso a paso'],
@@ -568,29 +1104,46 @@
       ['choice', '🎯', 'Elegir', 'Escoge la respuesta correcta entre varias opciones.', 'Ronda rápida']
     ];
 
-    const modeCards = modes.map(([mode, symbol, title, description, tag]) => node('article', { className: 'play-mode' }, [
-      node('div', { style: 'display:flex;justify-content:space-between;width:100%;align-items:center' }, [
-        text('span', symbol, 'play-symbol'),
-        text('span', tag, 'play-mode-tag')
+    const modeCards = modes.map(([mode, symbol, title, description, tag], i) => node('article', { className: 'play-mode studio-mode studio-mode-' + mode }, [
+      text('span', tag, 'play-mode-tag'),
+      node('div', { className: 'studio-art studio-art-' + mode, 'aria-hidden': 'true' }, [
+        text('span', mode === 'match' ? 'A' : '✦', 'studio-paper paper-one'),
+        text('span', mode === 'match' ? 'A' : '?', 'studio-paper paper-two'),
+        text('span', mode === 'learn' ? 'Aa' : '✓', 'studio-paper paper-three')
       ]),
       text('h2', title),
       text('p', description),
-      button(state.loading ? 'Preparando…' : 'Empezar', 'start', { 'data-mode': mode, 'aria-label': 'Empezar ' + title, className: 'btn btn-primary', disabled: state.loading || !state.ready })
+      button(state.loading ? 'Preparando…' : (i === 0 ? 'Empezar ahora' : 'Elegir') + ' →', 'start', { 'data-mode': mode, 'aria-label': 'Empezar ' + title, className: 'btn btn-primary', disabled: state.loading || !state.ready || selectedCount === 0 })
     ]));
+
+    const step3 = node('section', { className: 'studio-mode-section', 'aria-label': 'Modos de práctica' }, [
+      node('div', { className: 'studio-section-heading' }, [
+        text('h2', '¿Cómo quieres practicar hoy?'),
+        text('p', 'Sin prisa. A tu manera.')
+      ]),
+      node('div', { className: 'play-modes studio-primary-modes' }, modeCards.slice(0, 3)),
+      text('h2', 'Un reto diferente', 'studio-secondary-title'),
+      node('div', { className: 'play-modes studio-secondary-modes' }, modeCards.slice(3))
+    ]);
 
     content.replaceChildren(
       hero,
-      settings,
-      node('div', { className: 'play-modes' }, modeCards),
+      configGrid,
+      step3,
       text('p', 'La práctica se guarda por separado de tus repasos. Algunas tarjetas pueden necesitar ajustes para usarse en los juegos.', 'play-note')
     );
 
     if (!state.ready) content.append(button('Volver a cargar los mazos', 'reload'));
+
+    if (state.explorer?.open) {
+      renderDeckExplorerDialog();
+    }
   }
 
   // ── Inicialización de Sesiones ───────────────────────────────
   async function start(mode, retryCards) {
     if (state.loading || !modeNames[mode]) return;
+    Confetti.stop();
     if (state.matchTimerInterval) { clearInterval(state.matchTimerInterval); state.matchTimerInterval = null; }
     state.loading = true;
     say('Cargando tarjetas con soporte multimedia completo…');
@@ -599,7 +1152,12 @@
 
     try {
       let pool, skipped = 0;
-      let deckName = state.decks.find(deck => String(deck.id) === String(state.deckId))?.name || 'Todos mis mazos';
+      let deckName = 'Todos mis mazos';
+      if (state.deckId !== 'all') {
+        const { allItems } = getHierarchicalStructure(state.decks);
+        const targetDeck = allItems.find(d => String(d.id) === String(state.deckId));
+        deckName = targetDeck ? targetDeck.name : 'Todos mis mazos';
+      }
 
       if (retryCards) {
         pool = retryCards;
@@ -729,7 +1287,7 @@
       frontChildren.push(node('img', { src: card.frontImage, className: 'game-card-img', alt: 'Imagen de tarjeta' }));
     }
     if (card.frontAudio) {
-      frontChildren.push(button('🔊 Escuchar', 'play-audio', { 'data-audio': card.frontAudio, className: 'game-audio-pill' }));
+      frontChildren.push(audioButton(card.frontAudio, 'Reproducir audio'));
     }
     if (card.ipa) {
       frontChildren.push(text('span', `[ ${card.ipa} ]`, 'game-ipa-badge'));
@@ -745,7 +1303,7 @@
       backChildren.push(node('img', { src: card.backImage, className: 'game-card-img', alt: 'Imagen de tarjeta' }));
     }
     if (card.backAudio) {
-      backChildren.push(button('🔊 Escuchar pronunciación', 'play-audio', { 'data-audio': card.backAudio, className: 'game-audio-pill' }));
+      backChildren.push(audioButton(card.backAudio, 'Reproducir pronunciación'));
     }
     backChildren.push(text('p', card.back, 'flashcard-text'));
     if (card.example) {
@@ -784,7 +1342,7 @@
       questionBox.append(node('img', { src: q.frontImage, className: 'game-card-img', alt: 'Imagen de pregunta' }));
     }
     if (q.frontAudio) {
-      questionBox.append(button('🔊 Escuchar', 'play-audio', { 'data-audio': q.frontAudio, className: 'game-audio-pill' }));
+      questionBox.append(audioButton(q.frontAudio, 'Reproducir audio'));
     }
     if (q.ipa) {
       questionBox.append(text('span', `[ ${q.ipa} ]`, 'game-ipa-badge'));
@@ -957,7 +1515,7 @@
       qMedia.append(node('img', { src: question.frontImage, className: 'game-card-img', alt: 'Pregunta' }));
     }
     if (question.frontAudio) {
-      qMedia.append(button('🔊 Escuchar', 'play-audio', { 'data-audio': question.frontAudio, className: 'game-audio-pill' }));
+      qMedia.append(audioButton(question.frontAudio, 'Reproducir audio'));
     }
     if (question.ipa) {
       qMedia.append(text('span', `[ ${question.ipa} ]`, 'game-ipa-badge'));
@@ -1100,8 +1658,6 @@
           localStorage.setItem('codex_match_best_' + (state.deckId || 'all'), String(session.elapsedMs));
           session.newBest = true;
         }
-        Confetti.burst(90);
-        SoundFX.playVictory();
         finish();
         return;
       }
@@ -1391,10 +1947,226 @@
   }
 
   // ── Importación Multiformato & Quizlet ───────────────────────
-  function invalidateImport() {
-    input.revision++; input.preview = null; input.message = ''; input.error = '';
-    content.querySelector('.play-preview')?.remove();
-    content.querySelector('#import-feedback')?.replaceChildren();
+  let importDebounceTimer = null;
+
+  function invalidateImport(skipDomClear = false) {
+    input.revision++;
+    input.preview = null;
+    input.message = '';
+    input.error = '';
+    input.previewIndex = 0;
+    input.previewFlipped = false;
+    if (!skipDomClear) {
+      content.querySelector('#import-preview-container')?.replaceChildren(buildImportPreviewBlock());
+      content.querySelector('#import-feedback')?.replaceChildren();
+      updateImportActionButtons();
+    }
+  }
+
+  async function executeImportPreview(isAuto = false) {
+    input.revision++;
+    const currentRev = input.revision;
+
+    if (input.source === 'paste' && !input.text.trim()) {
+      input.preview = null;
+      input.error = '';
+      input.busy = false;
+      renderImportSectionOnly();
+      return;
+    }
+    if (input.source === 'file' && !input.file) {
+      input.preview = null;
+      input.error = '';
+      input.busy = false;
+      renderImportSectionOnly();
+      return;
+    }
+
+    input.busy = true;
+    updateImportActionButtons();
+
+    try {
+      let rawBytes;
+      let filename = 'pasted.txt';
+      if (input.source === 'file' && input.file) {
+        filename = input.file.name;
+        rawBytes = await input.file.arrayBuffer();
+      } else {
+        filename = 'pasted.tsv';
+        rawBytes = new TextEncoder().encode(input.text);
+      }
+
+      const params = new URLSearchParams({
+        name: filename,
+        separator: input.separator,
+        header: input.header ? '1' : '0'
+      });
+
+      const body = await api(`/api/import/text/preview?${params.toString()}`, rawBytes, true);
+
+      if (currentRev !== input.revision) {
+        return;
+      }
+
+      input.preview = body;
+      input.error = '';
+      if (input.previewIndex >= (body.cards?.length || 0)) {
+        input.previewIndex = 0;
+      }
+      input.previewFlipped = false;
+    } catch (err) {
+      if (currentRev === input.revision) {
+        input.error = errorMessage(err);
+        input.preview = null;
+      }
+    } finally {
+      if (currentRev === input.revision) {
+        input.busy = false;
+        renderImportSectionOnly();
+      }
+    }
+  }
+
+  function scheduleReactivePreview() {
+    if (importDebounceTimer) clearTimeout(importDebounceTimer);
+    importDebounceTimer = setTimeout(() => {
+      executeImportPreview(true);
+    }, 240);
+  }
+
+  function updateImportActionButtons() {
+    const previewBtn = document.querySelector('#preview-import-btn');
+    const saveBtn = document.querySelector('#save-import-btn');
+    const canSave = Boolean(input.preview?.cards?.length && !input.busy);
+
+    if (previewBtn) {
+      previewBtn.disabled = input.busy;
+      previewBtn.textContent = input.busy ? 'Procesando…' : 'Previsualizar tarjetas';
+    }
+    if (saveBtn) {
+      saveBtn.disabled = !canSave;
+      if (canSave) {
+        saveBtn.classList.remove('disabled');
+        saveBtn.classList.add('btn-success');
+      } else {
+        saveBtn.classList.add('disabled');
+        saveBtn.classList.remove('btn-success');
+      }
+    }
+  }
+
+  function renderImportSectionOnly() {
+    const container = document.querySelector('#import-preview-container');
+    if (!container) {
+      render();
+      return;
+    }
+    container.replaceChildren(buildImportPreviewBlock());
+    updateImportActionButtons();
+  }
+
+  function buildImportPreviewBlock() {
+    if (input.error) {
+      return node('div', { className: 'play-error', style: 'margin-top:18px' }, [
+        text('strong', 'Error de formato al procesar datos:'),
+        text('p', input.error)
+      ]);
+    }
+
+    if (!input.preview?.cards?.length) {
+      return node('div', { className: 'import-empty-guide' }, [
+        text('p', 'Escribe o pega tus tarjetas arriba para ver la vista previa interactiva en tiempo real.')
+      ]);
+    }
+
+    const cards = input.preview.cards;
+    const total = cards.length;
+    const currentCard = cards[input.previewIndex] || cards[0];
+
+    // 1. Tabla de revisión de hasta 20 filas
+    const tableRows = cards.slice(0, 20).map((c, i) => node('tr', {
+      className: i === input.previewIndex ? 'import-row-active' : '',
+      style: `cursor:pointer;${i === input.previewIndex ? 'background:rgba(99,102,241,0.08);font-weight:600' : ''}`,
+      onclick: () => {
+        input.previewIndex = i;
+        input.previewFlipped = false;
+        renderImportSectionOnly();
+      }
+    }, [
+      text('td', String(i + 1)),
+      text('td', c.front || '(vacío)'),
+      text('td', c.back || '(vacío)')
+    ]));
+
+    const tableCol = node('div', { className: `import-preview-table-col import-tab-pane ${input.mobileTab === 'table' ? 'active' : ''}` }, [
+      node('h3', {}, [
+        text('span', `Revisión de datos (${Math.min(20, total)} de ${total} filas)`),
+        total > 20 ? text('small', `+${total - 20} más`, 'muted') : null
+      ]),
+      node('div', { className: 'import-preview-table-wrapper' }, [
+        node('table', {}, [
+          node('thead', {}, [node('tr', {}, ['#', 'Pregunta / Término', 'Respuesta / Definición'].map(h => text('th', h)))]),
+          node('tbody', {}, tableRows)
+        ])
+      ])
+    ]);
+
+    // 2. Tarjeta Interactiva Real de Juegos
+    const cardTextContent = input.previewFlipped ? (currentCard.back || '(Sin respuesta)') : (currentCard.front || '(Sin pregunta)');
+    const cardSideLabel = input.previewFlipped ? 'Respuesta · Reverso' : 'Pregunta · Anverso';
+
+    const cardCol = node('div', { className: `import-preview-card-col import-tab-pane ${input.mobileTab === 'card' ? 'active' : ''}` }, [
+      node('div', { className: 'import-card-interactive' }, [
+        node('div', { className: 'import-card-header' }, [
+          text('span', `Tarjeta ${input.previewIndex + 1} de ${total}`, 'import-card-counter'),
+          node('div', { className: 'import-card-nav' }, [
+            button('Anterior', 'import-prev-card', {
+              className: 'btn btn-quiet btn-sm',
+              disabled: input.previewIndex === 0
+            }),
+            button('Siguiente', 'import-next-card', {
+              className: 'btn btn-quiet btn-sm',
+              disabled: input.previewIndex >= total - 1
+            })
+          ])
+        ]),
+        node('div', {
+          className: 'import-card-body',
+          'data-action': 'import-flip-card',
+          tabIndex: 0,
+          role: 'button',
+          'aria-label': 'Voltear tarjeta'
+        }, [
+          text('span', cardSideLabel, 'import-card-badge'),
+          text('div', cardTextContent, 'import-card-text'),
+          text('span', 'Haz clic para alternar anverso / reverso', 'import-card-hint')
+        ]),
+        node('div', { style: 'display:flex;justify-content:center;gap:10px' }, [
+          button(input.previewFlipped ? 'Ver pregunta' : 'Ver respuesta', 'import-flip-card', {
+            className: 'btn btn-quiet btn-sm'
+          })
+        ])
+      ])
+    ]);
+
+    // Selector de pestañas para móvil
+    const mobileTabs = node('div', { className: 'import-mobile-tabs' }, [
+      button('Tabla de datos', 'import-tab-table', {
+        className: `btn btn-quiet ${input.mobileTab === 'table' ? 'btn-primary' : ''}`
+      }),
+      button('Tarjeta interactiva', 'import-tab-card', {
+        className: `btn btn-quiet ${input.mobileTab === 'card' ? 'btn-primary' : ''}`
+      })
+    ]);
+
+    return node('div', { className: 'play-preview' }, [
+      text('h2', `Vista previa (${total} ${total === 1 ? 'tarjeta detectada' : 'tarjetas detectadas'})`),
+      mobileTabs,
+      node('div', { className: 'import-split-layout' }, [
+        tableCol,
+        cardCol
+      ])
+    ]);
   }
 
   function renderImport() {
@@ -1404,8 +2176,8 @@
     ]);
 
     const controls = [
-      text('h1', 'Importador Multiformato Universal'),
-      text('p', 'Importa tus tarjetas desde Quizlet, Excel, CSV, TSV, TXT tabulado o JSON de forma 100% legal e independiente.'),
+      text('h1', 'Importador Multiformato'),
+      text('p', 'Importa tus tarjetas desde Quizlet, Excel, archivos CSV, TSV, TXT tabulados o JSON en tu biblioteca local.'),
       field('Origen de los datos', source)
     ];
 
@@ -1426,7 +2198,7 @@
     }
 
     controls.push(
-      node('div', { className: 'play-settings' }, [
+      node('div', { className: 'play-settings play-import-settings' }, [
         field('Separador de columnas', node('select', { id: 'import-separator', disabled: input.busy }, [
           node('option', { value: 'auto', text: 'Detectar automáticamente (recomendado)', selected: input.separator === 'auto' }),
           node('option', { value: '\t', text: 'Tabulación (Quizlet estándar)', selected: input.separator === '\t' }),
@@ -1434,7 +2206,7 @@
           node('option', { value: ';', text: 'Punto y coma (;)', selected: input.separator === ';' }),
           node('option', { value: '-', text: 'Guion (-)', selected: input.separator === '-' })
         ])),
-        node('label', { className: 'play-check', style: 'align-self:center;margin-top:16px' }, [
+        node('label', { className: 'play-check' }, [
           node('input', { type: 'checkbox', id: 'import-header', checked: input.header, disabled: input.busy }),
           'La primera fila contiene encabezados'
         ]),
@@ -1452,30 +2224,25 @@
       })));
     }
 
+    const canSave = Boolean(input.preview?.cards?.length && !input.busy);
     controls.push(
       node('div', { className: 'play-import-actions' }, [
-        button(input.busy ? 'Procesando…' : 'Previsualizar tarjetas', 'preview-import', { className: 'btn btn-primary', disabled: input.busy }),
-        input.preview?.cards?.length ? button('Guardar en mi biblioteca', 'save-import', { className: 'btn', disabled: input.busy }) : null
+        button(input.busy ? 'Procesando…' : 'Previsualizar tarjetas', 'preview-import', {
+          id: 'preview-import-btn',
+          className: 'btn btn-primary',
+          disabled: input.busy
+        }),
+        button('Guardar en mi biblioteca', 'save-import', {
+          id: 'save-import-btn',
+          className: `btn ${canSave ? 'btn-success' : 'disabled'}`,
+          disabled: !canSave
+        })
       ]),
-      node('div', { id: 'import-feedback' })
+      node('div', { id: 'import-feedback' }),
+      node('div', { id: 'import-preview-container' }, [
+        buildImportPreviewBlock()
+      ])
     );
-
-    if (input.preview?.cards?.length) {
-      const rows = input.preview.cards.slice(0, 20).map((c, i) => node('tr', {}, [
-        text('td', String(i + 1)),
-        text('td', c.front),
-        text('td', c.back)
-      ]));
-      controls.push(node('div', { className: 'play-preview' }, [
-        text('h2', `Vista previa (${input.preview.cards.length} tarjetas detectadas)`),
-        node('div', { className: 'import-preview' }, [
-          node('table', {}, [
-            node('thead', {}, [node('tr', {}, ['#', 'Pregunta / Término', 'Respuesta / Definición'].map(h => text('th', h)))]),
-            node('tbody', {}, rows)
-          ])
-        ])
-      ]));
-    }
 
     content.replaceChildren(node('section', { className: 'panel play-import' }, controls));
   }
@@ -1548,10 +2315,14 @@
 
   // ── Render Enrutador ─────────────────────────────────────────
   function render() {
+    document.body.classList.toggle('studio-session', state.tab === 'play' && !!state.session && !state.session.completed);
+    document.body.classList.toggle('studio-home', state.tab === 'play' && !state.session);
+    syncStudioTheme();
     tabs.forEach(tab => {
       const active = tab.dataset.tab === state.tab;
       tab.classList.toggle('active', active);
-      tab.setAttribute('aria-selected', String(active));
+      if (active) tab.setAttribute('aria-current', 'page');
+      else tab.removeAttribute('aria-current');
     });
 
     if (state.tab === 'import') renderImport();
@@ -1569,6 +2340,7 @@
   }
 
   function changeTab(tab) {
+    Confetti.stop();
     state.tab = ['play', 'import', 'history'].includes(tab) ? tab : 'play';
     if (location.hash !== '#' + state.tab) history.replaceState(null, '', '#' + state.tab);
     say('');
@@ -1588,6 +2360,13 @@
 
     const action = target.dataset.action;
 
+    if (action === 'toggle-theme') {
+      const dark = document.documentElement.classList.toggle('dark');
+      try { localStorage.setItem('anki2-theme', dark ? 'dark' : 'light'); } catch (_) {}
+      syncStudioTheme();
+      return;
+    }
+
     // Reproducción de audio Anki
     if (action === 'play-audio') {
       const audioUrl = target.getAttribute('data-audio');
@@ -1597,6 +2376,43 @@
 
     if (action === 'toggle-sound') {
       SoundFX.toggle();
+      render();
+      return;
+    }
+
+    if (action === 'open-deck-explorer') {
+      openExplorer(target);
+      return;
+    }
+
+    if (action === 'close-deck-explorer') {
+      closeExplorer();
+      return;
+    }
+
+    if (action === 'explore-folder') {
+      state.explorer.currentFolder = target.getAttribute('data-folder') || '';
+      state.explorer.searchQuery = '';
+      renderDeckExplorerDialog();
+      return;
+    }
+
+    if (action === 'clear-explorer-search') {
+      state.explorer.searchQuery = '';
+      const searchInp = document.querySelector('#explorer-search-input');
+      if (searchInp) {
+        searchInp.value = '';
+        searchInp.focus();
+      }
+      renderDeckExplorerDialog();
+      return;
+    }
+
+    if (action === 'select-deck-or-folder') {
+      const did = target.getAttribute('data-deck-id');
+      state.deckId = did;
+      SoundFX.playSelect();
+      closeExplorer();
       render();
       return;
     }
@@ -1769,44 +2585,75 @@
       return;
     }
 
-    // Importación
-    if (action === 'preview-import') {
-      input.busy = true; invalidateImport(); render();
-      try {
-        let body;
-        if (input.source === 'file' && input.file) {
-          const buffer = await input.file.arrayBuffer();
-          body = await api(`/api/import/preview?filename=${encodeURIComponent(input.file.name)}&separator=${encodeURIComponent(input.separator)}&header=${input.header ? '1' : '0'}`, buffer, true);
-        } else {
-          body = await api('/api/import/preview', { text: input.text, separator: input.separator, header: input.header });
-        }
-        input.preview = body;
-      } catch (err) {
-        input.error = errorMessage(err);
-      } finally {
-        input.busy = false; render();
+    // Importación interactiva y navegación de vista previa
+    if (action === 'import-prev-card') {
+      if (input.previewIndex > 0) {
+        input.previewIndex--;
+        input.previewFlipped = false;
+        renderImportSectionOnly();
       }
       return;
     }
 
+    if (action === 'import-next-card') {
+      if (input.preview?.cards && input.previewIndex < input.preview.cards.length - 1) {
+        input.previewIndex++;
+        input.previewFlipped = false;
+        renderImportSectionOnly();
+      }
+      return;
+    }
+
+    if (action === 'import-flip-card') {
+      input.previewFlipped = !input.previewFlipped;
+      renderImportSectionOnly();
+      return;
+    }
+
+    if (action === 'import-tab-table') {
+      input.mobileTab = 'table';
+      renderImportSectionOnly();
+      return;
+    }
+
+    if (action === 'import-tab-card') {
+      input.mobileTab = 'card';
+      renderImportSectionOnly();
+      return;
+    }
+
+    if (action === 'preview-import') {
+      executeImportPreview(false);
+      return;
+    }
+
     if (action === 'save-import') {
-      if (!input.preview?.cards?.length) return;
-      input.busy = true; render();
+      if (!input.preview?.cards?.length || input.busy) return;
+      input.busy = true;
+      updateImportActionButtons();
       try {
+        let targetDeckId = input.deckId;
+        if (targetDeckId === 'new' || !targetDeckId) {
+          const newDeckName = (input.newDeck || '').trim() || 'Mazo importado';
+          const newDeckRes = await api('/api/decks', { name: newDeckName });
+          targetDeckId = newDeckRes.id;
+        }
+
         const payload = {
-          deckId: input.deckId === 'new' ? null : input.deckId,
-          deckName: input.deckId === 'new' ? (input.newDeck || 'Mazo importado') : null,
+          deckId: targetDeckId,
           cards: input.preview.cards
         };
-        const result = await api('/api/import/save', payload);
-        say(`¡Éxito! Se importaron ${result.added} tarjetas a tu biblioteca.`);
-        input.text = ''; input.file = null; input.preview = null;
+        const result = await api('/api/import/text/commit', payload);
+        say(`¡Éxito! Se importaron ${result.added || result.count || input.preview.cards.length} tarjetas a tu biblioteca.`);
+        input.text = ''; input.file = null; input.preview = null; input.previewIndex = 0; input.previewFlipped = false;
         await boot();
         changeTab('play');
       } catch (err) {
         input.error = errorMessage(err);
+        renderImportSectionOnly();
       } finally {
-        input.busy = false; render();
+        input.busy = false;
+        updateImportActionButtons();
       }
       return;
     }
@@ -1834,21 +2681,47 @@
     if (el.id === 'practice-deck') { state.deckId = el.value; render(); }
     else if (el.id === 'practice-size') { state.size = parseInt(el.value); }
     else if (el.id === 'import-source') { input.source = el.value; invalidateImport(); render(); }
-    else if (el.id === 'import-file') { input.file = el.files[0] || null; invalidateImport(); render(); }
-    else if (el.id === 'import-separator') { input.separator = el.value; invalidateImport(); }
-    else if (el.id === 'import-header') { input.header = el.checked; invalidateImport(); }
+    else if (el.id === 'import-file') { input.file = el.files[0] || null; invalidateImport(); executeImportPreview(false); }
+    else if (el.id === 'import-separator') { input.separator = el.value; invalidateImport(true); executeImportPreview(false); }
+    else if (el.id === 'import-header') { input.header = el.checked; invalidateImport(true); executeImportPreview(false); }
     else if (el.id === 'import-deck') { input.deckId = el.value; render(); }
   });
 
   document.addEventListener('input', event => {
     const el = event.target;
-    if (el.dataset.qid && state.session?.answers) {
+    if (el.id === 'import-paste') {
+      input.text = el.value;
+      invalidateImport(true);
+      scheduleReactivePreview();
+    } else if (el.id === 'import-new-deck') {
+      input.newDeck = el.value;
+    } else if (el.id === 'explorer-search-input') {
+      state.explorer.searchQuery = el.value;
+      renderDeckExplorerDialog();
+    } else if (el.dataset.qid && state.session?.answers) {
       state.session.answers[el.dataset.qid] = el.value;
     }
   });
 
   // ── Atajos de Teclado Universales ────────────────────────────
   window.addEventListener('keydown', event => {
+    if (state.explorer?.open) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeExplorer();
+        return;
+      }
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      const btnTarget = event.target.closest('[role="button"][data-action]');
+      if (btnTarget && btnTarget.tagName !== 'BUTTON' && btnTarget.tagName !== 'INPUT') {
+        event.preventDefault();
+        btnTarget.click();
+        return;
+      }
+    }
+
     const session = state.session;
     if (!session || session.completed) return;
 
@@ -1920,6 +2793,8 @@
     }
   } catch (_) {}
 
+  window.state = state;
+  window.api = api;
   changeTab(location.hash.slice(1));
   boot();
   state.pending.slice().forEach(saveResult);

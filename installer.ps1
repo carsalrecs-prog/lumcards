@@ -17,7 +17,7 @@ $sourceDir = $PSScriptRoot
 $appFiles = @(
     'Lumcards.exe', 'Lumcards.exe.config', 'Cerrar Lumcards.exe',
     'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll',
-    'server.py', 'engine.py', 'native_image_occlusion.py', 'text_import.py', 'clean_anki_importer.py', 'practice_store.py', 'start.ps1', 'stop.ps1',
+    'server.py', 'engine.py', 'clean_engine.py', 'native_image_occlusion.py', 'text_import.py', 'clean_anki_importer.py', 'practice_store.py', 'start.ps1', 'stop.ps1',
     'requirements.txt', 'requirements-lock.txt', 'README.md', 'IDEAS.md', 'IMAGE_OCCLUSION_SOURCES.md', 'COMMERCIAL_ROADMAP.md',
     'INICIAR LUMCARDS.cmd', 'CERRAR LUMCARDS.cmd', 'Desinstalar Lumcards.cmd',
     'installer.ps1', 'uninstall.ps1', 'Instalar Lumcards.cmd', 'Instalador Lumcards.exe',
@@ -29,7 +29,7 @@ $appFiles = @(
     'tools\vendor\webview2\WebView2Loader.dll'
 )
 $appDirectories = @('assets', 'dist', '.venv')
-foreach ($requiredFile in @('Lumcards.exe', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'server.py', 'start.ps1')) {
+foreach ($requiredFile in @('Lumcards.exe', 'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'WebView2Loader.dll', 'server.py', 'engine.py', 'clean_engine.py', 'start.ps1')) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceDir $requiredFile) -PathType Leaf)) {
         throw "El paquete de escritorio esta incompleto: falta $requiredFile. Ejecuta tools\build-desktop.ps1 antes de instalar."
     }

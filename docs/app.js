@@ -59,36 +59,61 @@ const AudioController = {
   queueIndex: 0,
   unlocked: false,
   pendingList: null,
+  timerId: null,
+  playbackId: 0,
+  element: null,
 
   unlock() {
-    if (this.unlocked) return;
+    this.unlocked = true;
+    document.getElementById('anki-audio-prompt')?.remove();
+    if (this.pendingList) {
+      const list = this.pendingList;
+      this.pendingList = null;
+      this.playList(list);
+    }
+  },
+
+  ensureElement() {
+    if (this.element?.isConnected) return this.element;
+    const audio = document.createElement('audio');
+    audio.id = 'anki-study-audio';
+    audio.preload = 'auto';
+    audio.setAttribute('aria-hidden', 'true');
+    audio.style.display = 'none';
+    document.body.appendChild(audio);
+    this.element = audio;
+    return audio;
+  },
+
+  prepare(src) {
+    const audio = this.ensureElement();
     try {
-      const a = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
-      a.volume = 0.01;
-      const p = a.play();
-      if (p !== undefined) {
-        p.then(() => {
-          this.unlocked = true;
-          document.getElementById('anki-audio-prompt')?.remove();
-          if (this.pendingList) {
-            const list = this.pendingList;
-            this.pendingList = null;
-            this.playList(list);
-          }
-        }).catch(() => {});
-      }
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
     } catch {}
+    audio.src = src;
+    audio.currentTime = 0;
+    try { audio.load(); } catch {}
+    return audio;
   },
 
   stop() {
+    this.playbackId += 1;
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
     this.queue = [];
     this.queueIndex = 0;
+    this.pendingList = null;
     if (this.currentAudio) {
-      try {
-        this.currentAudio.pause();
-        this.currentAudio.currentTime = 0;
-      } catch {}
+      const prev = this.currentAudio;
       this.currentAudio = null;
+      try {
+        prev.pause();
+        prev.currentTime = 0;
+      } catch {}
     }
   },
 
@@ -101,20 +126,32 @@ const AudioController = {
   },
 
   playNext() {
-    if (this.queueIndex >= this.queue.length) return;
-    const file = this.queue[this.queueIndex++];
-    if (file.includes('_1sec.mp3')) {
-      setTimeout(() => this.playNext(), 800);
+    if (this.timerId) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+    if (this.queueIndex >= this.queue.length) {
+      this.currentAudio = null;
       return;
     }
-    const src = file.startsWith('http') || file.startsWith('/') ? file : ('/media/' + file);
-    const audio = new Audio(src);
+    const file = this.queue[this.queueIndex++];
+    if (file.includes('_1sec.mp3')) {
+      this.timerId = setTimeout(() => this.playNext(), 800);
+      return;
+    }
+    const fullSrc = file.startsWith('http') || file.startsWith('/') ? file : ('/media/' + file);
+    const audio = this.prepare(fullSrc);
+    const playbackId = ++this.playbackId;
     this.currentAudio = audio;
     audio.onended = () => {
-      setTimeout(() => this.playNext(), 120);
+      if (this.currentAudio === audio && this.playbackId === playbackId) {
+        this.timerId = setTimeout(() => this.playNext(), 120);
+      }
     };
     audio.onerror = () => {
-      this.playNext();
+      if (this.currentAudio === audio && this.playbackId === playbackId) {
+        this.playNext();
+      }
     };
     const p = audio.play();
     if (p !== undefined) {
@@ -122,24 +159,42 @@ const AudioController = {
         this.unlocked = true;
         document.getElementById('anki-audio-prompt')?.remove();
       }).catch(err => {
-        console.warn('Autoplay waiting for user gesture:', err);
-        this.pendingList = [file, ...this.queue.slice(this.queueIndex)];
-        this.showPrompt();
+        if (this.currentAudio === audio && this.playbackId === playbackId) {
+          console.warn('Autoplay waiting for user gesture:', err);
+          this.pendingList = [file, ...this.queue.slice(this.queueIndex)];
+          this.showPrompt();
+        }
       });
     }
   },
 
   playSingle(src) {
     this.stop();
+    if (!src) return;
     const fullSrc = src.startsWith('http') || src.startsWith('/') ? src : ('/media/' + src);
-    const audio = new Audio(fullSrc);
+    const audio = this.prepare(fullSrc);
+    const playbackId = ++this.playbackId;
     this.currentAudio = audio;
-    audio.play().then(() => {
-      this.unlocked = true;
-      document.getElementById('anki-audio-prompt')?.remove();
-    }).catch(err => {
-      console.warn('Audio play error:', err);
-    });
+    audio.onended = () => {
+      if (this.currentAudio === audio && this.playbackId === playbackId) this.currentAudio = null;
+    };
+    audio.onerror = () => {
+      if (this.currentAudio === audio && this.playbackId === playbackId) this.currentAudio = null;
+    };
+    const p = audio.play();
+    if (p !== undefined) {
+      p.then(() => {
+        this.unlocked = true;
+        document.getElementById('anki-audio-prompt')?.remove();
+      }).catch(err => {
+        console.warn('Audio play error:', err);
+        if (this.currentAudio === audio && this.playbackId === playbackId) {
+          this.currentAudio = null;
+          this.pendingList = [src];
+          this.showPrompt();
+        }
+      });
+    }
   },
 
   showPrompt() {
@@ -152,7 +207,7 @@ const AudioController = {
       this.unlock();
       banner.remove();
     };
-    const container = document.querySelector('.anki-card-container') || document.body;
+    const container = document.querySelector('.anki-study-stage') || document.querySelector('.anki-card-container') || document.body;
     container.appendChild(banner);
   }
 };
@@ -691,7 +746,7 @@ function dashboard(){
   </section>`;
 }
 
-function deckCard(d,i){
+function deckCard(d,i,isPreview=false){
   const isFolder = d.isFolder && !activeFolder;
   const childDecks = data.decks.filter(x => x.parentName === d.name);
   const childCount = childDecks.length || (d.childIds ? Math.max(0, d.childIds.length - 1) : 0);
@@ -699,20 +754,44 @@ function deckCard(d,i){
   const mastered = d.total ? Math.round((d.learned||0)/d.total*100) : 0;
   const displayName = isFolder ? d.name : (d.shortName || d.name);
 
-  return `<article class="deck-card ${isFolder?'folder-card':''}" style="--deck-bg:${bg};--deck-color:${color}">
-    <div class="deck-top">
-      <span class="deck-icon">${icon(isFolder ? 'folder' : ic)}</span>
-      <details class="deck-options"><summary class="icon-button" aria-label="Opciones de ${esc(displayName)}">${icon('settings')}</summary><div class="deck-options-panel">
+  const optionsMenu = isPreview ? `
+    <span class="icon-button disabled" aria-hidden="true" style="opacity:0.45;pointer-events:none">${icon('settings')}</span>
+  ` : `
+    <details class="deck-options"><summary class="icon-button" aria-label="Opciones de ${esc(displayName)}">${icon('settings')}</summary><div class="deck-options-panel">
 ${!isFolder ? button('Plan de estudio','deck-config','settings','',`data-id="${d.id}"`) + button('Mover a carpeta','move-deck-modal','folder','',`data-id="${d.id}"`) : ''}
 ${button('Renombrar '+(isFolder?'carpeta':'mazo'),'rename-deck','edit','',`data-id="${d.id}"`)}
 ${button('Abrir '+(isFolder?'carpeta':'mazo'),isFolder?'open-folder':'open-deck','chevron','',`data-id="${d.id}"`)}
+<button type="button" class="btn-menu text-danger" data-action="delete-deck-prompt" data-id="${d.id}">${icon('trash')} Eliminar ${isFolder?'carpeta':'mazo'}</button>
 </div></details>
+  `;
+
+  const titleEl = isPreview ? `
+    <div class="deck-title" style="display:flex;align-items:center;gap:6px;pointer-events:none">${esc(displayName)}</div>
+  ` : `
+    <button class="deck-title" data-action="${isFolder ? 'open-folder' : 'open-deck'}" data-id="${d.id}" style="display:flex;align-items:center;gap:6px">
+      ${esc(displayName)}
+    </button>
+  `;
+
+  const bottomActions = isPreview ? `
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-quiet disabled" disabled style="pointer-events:none;opacity:0.65">${isFolder ? icon('folder') + ' Abrir (Muestra)' : icon('arrow') + ' Estudiar (Muestra)'}</button>
+    </div>
+  ` : `
+    <div style="display:flex;gap:6px">
+      ${isFolder ? `<button class="btn btn-quiet" data-action="open-folder" data-id="${d.id}">${icon('folder')} Abrir libros</button>` : ''}
+      ${button('Estudiar','study','arrow','',`data-id="${d.id}"`)}
+    </div>
+  `;
+
+  return `<article class="deck-card ${isFolder?'folder-card':''} ${isPreview?'deck-card-preview':''}" style="--deck-bg:${bg};--deck-color:${color}">
+    <div class="deck-top">
+      <span class="deck-icon">${icon(isFolder ? 'folder' : ic)}</span>
+      ${optionsMenu}
     </div>
     <div>
       <div class="deck-category">${isFolder ? `<span class="folder-badge">${icon('folder')} CARPETA · ${childCount} LIBROS</span>` : (d.name.includes('Demo')||d.name.includes('ejemplo')?'MAZO DE EJEMPLO':'LIBRO / MAZO')}</div>
-      <button class="deck-title" data-action="${isFolder ? 'open-folder' : 'open-deck'}" data-id="${d.id}" style="display:flex;align-items:center;gap:6px">
-        ${esc(displayName)}
-      </button>
+      ${titleEl}
       <div class="deck-meta">
         ${icon('layers')}${num(d.total)} tarjetas
         <span style="margin:0 4px">·</span>
@@ -722,16 +801,12 @@ ${button('Abrir '+(isFolder?'carpeta':'mazo'),isFolder?'open-folder':'open-deck'
     <div class="deck-progress">
       <div class="deck-progress-label">
         <span><strong>${num(d.learned||0)}</strong> repasadas (${mastered}%)</span>
-
       </div>
       <div class="progress"><span style="width:${mastered}%"></span></div>
     </div>
     <div class="deck-bottom">
       <span class="due-label ${getDue(d)?'':'caught-up'}">${getDue(d)?`${num(getDue(d))} para estudiar hoy`:'Al día'}</span>
-      <div style="display:flex;gap:6px">
-        ${isFolder ? `<button class="btn btn-quiet" data-action="open-folder" data-id="${d.id}">${icon('folder')} Abrir libros</button>` : ''}
-        ${button('Estudiar','study','arrow','',`data-id="${d.id}"`)}
-      </div>
+      ${bottomActions}
     </div>
   </article>`;
 }
@@ -739,18 +814,34 @@ ${button('Abrir '+(isFolder?'carpeta':'mazo'),isFolder?'open-folder':'open-deck'
 function cardsView(favorites=false){
   const deck=data.decks.find(d=>String(d.id)===String(selectedDeck));
   const cards=data.cards;
-  const learnedCount = cards.filter(c => c.status === 'learned' || (c.reviews > 0 && !c.isNew)).length;
-  const learningCount = cards.filter(c => c.status === 'learning').length;
-  const newCount = cards.filter(c => c.status === 'new' || c.isNew).length;
+  const hasBlockCards = cards.some(c => c.inBlock);
+  const blockPendingCount = cards.filter(c => c.blockPending).length;
+  const blockReviewedCount = cards.filter(c => c.blockReviewed).length;
+  const historyReviewedCount = cards.filter(c => c.historyReviewed || (!c.blockReviewed && (c.status === 'learned' || (c.reviews > 0 && !c.isNew)))).length;
+  const newCount = cards.filter(c => !c.historyReviewed && !c.blockReviewed && (c.status === 'new' || c.isNew)).length;
 
   let visible = cards;
-  if (cardProgressFilter === 'learned') {
-    visible = cards.filter(c => c.status === 'learned' || (c.reviews > 0 && !c.isNew));
+  if (cardProgressFilter === 'block-pending') {
+    visible = cards.filter(c => c.blockPending);
+  } else if (cardProgressFilter === 'block-reviewed') {
+    visible = cards.filter(c => c.blockReviewed);
+  } else if (cardProgressFilter === 'learned' || cardProgressFilter === 'history') {
+    visible = cards.filter(c => c.historyReviewed || (!c.blockReviewed && (c.status === 'learned' || (c.reviews > 0 && !c.isNew))));
   } else if (cardProgressFilter === 'learning') {
     visible = cards.filter(c => c.status === 'learning');
   } else if (cardProgressFilter === 'new') {
-    visible = cards.filter(c => c.status === 'new' || c.isNew);
+    visible = cards.filter(c => !c.historyReviewed && !c.blockReviewed && (c.status === 'new' || c.isNew));
   }
+
+  const filterTabs = [
+    ['all', `Todas (${cards.length})`]
+  ];
+  if (hasBlockCards) {
+    filterTabs.push(['block-pending', `⏳ Pendientes del bloque (${blockPendingCount})`]);
+    filterTabs.push(['block-reviewed', `🟢 Repasadas del bloque (${blockReviewedCount})`]);
+  }
+  filterTabs.push(['history', `✓ Repasadas antes (${historyReviewedCount})`]);
+  filterTabs.push(['new', `✦ Nuevas (${newCount})`]);
 
   return `${heading(favorites?'Lo que quieres tener a mano.':deck?esc(deck.name):'Cada tarjeta, una idea.',favorites?'Tus tarjetas favoritas, reunidas en un solo lugar.':`${num(browsePage.total)} tarjetas${selectedDeck?' en este mazo':' en tu biblioteca'}.`,(selectedDeck?button('Todos los mazos','back-decks','back'):'')+button('Crear tarjeta','new-card','plus','btn-primary'))}
   ${selectedDeck?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px;align-items:center">
@@ -758,17 +849,12 @@ function cardsView(favorites=false){
     ${button('Renombrar mazo','rename-deck','edit','',`data-id="${selectedDeck}"`)}
     ${button('Mover a carpeta','move-deck-modal','folder','',`data-id="${selectedDeck}"`)}
     ${button('Exportar mazo .apkg','export-deck','download','',`data-id="${selectedDeck}"`)}
-    ${button('Eliminar mazo','delete-deck','trash','btn-quiet',`data-id="${selectedDeck}"`)}
+    ${button('Eliminar mazo','delete-deck-prompt','trash','btn-quiet text-danger',`data-id="${selectedDeck}"`)}
   </div>`:''}
   
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;overflow-x:auto;padding:8px 12px;background:var(--panel);border-radius:10px;border:1px solid var(--line)">
     <span style="font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.8px;margin-right:4px">FILTRAR PROGRESO:</span>
-    ${[
-      ['all', `Todas (${cards.length})`],
-      ['learned', `🟢 Ya repasadas / Progreso (${learnedCount})`],
-      ['learning', `⚡ En aprendizaje (${learningCount})`],
-      ['new', `✦ Nuevas (${newCount})`],
-    ].map(([id, label]) => `
+    ${filterTabs.map(([id, label]) => `
       <button class="filter-tab ${cardProgressFilter === id ? 'active' : ''}" data-action="card-progress-filter" data-status="${id}" style="padding:5px 12px;border-radius:20px;border:1px solid ${cardProgressFilter === id ? 'var(--orange)' : 'var(--line)'};font-size:12px;cursor:pointer;background:${cardProgressFilter === id ? 'var(--soft)' : 'transparent'};font-weight:${cardProgressFilter === id ? '600' : '500'};color:${cardProgressFilter === id ? 'var(--orange)' : 'inherit'}">
         ${label}
       </button>
@@ -776,17 +862,21 @@ function cardsView(favorites=false){
   </div>
 
   <div class="card-list">${visible.map(c=>{
-    const isLearned = c.status === 'learned' || (c.reviews > 0 && !c.isNew);
-    const isLearning = c.status === 'learning';
-    const badge = isLearned
-      ? `<span class="tag tag-learned">${icon('check')} Repasada (${c.reviews||1} ${c.reviews===1?'repaso':'repasos'}${c.interval?` · int. ${c.interval}d`:''})</span>`
-      : isLearning
-      ? `<span class="tag tag-learning">⚡ En aprendizaje (${c.reviews||1} ${c.reviews===1?'repaso':'repasos'})</span>`
-      : `<span class="tag tag-new">✦ Nueva · Sin estudiar</span>`;
-    const iconBg = isLearned ? 'background:#dcfce7;color:#16a34a' : isLearning ? 'background:#fef3c7;color:#d97706' : 'background:#e0f2fe;color:#0284c7';
+    let badge = '';
+    if (c.blockReviewed) {
+      badge += `<span class="tag tag-block-reviewed">${icon('check')} Repasada en este bloque</span>`;
+    } else if (c.blockPending) {
+      badge += `<span class="tag tag-block-pending">⏳ Pendiente del bloque</span>`;
+    }
+    if (c.historyReviewed || (c.status === 'learned' || (c.reviews > 0 && !c.isNew))) {
+      badge += `<span class="tag tag-history-reviewed">✓ Repasada antes (${c.reviews||1} ${c.reviews===1?'repaso':'repasos'}${c.interval?` · int. ${c.interval}d`:''})</span>`;
+    } else if (!c.blockReviewed) {
+      badge += `<span class="tag tag-new">✦ Nueva · Sin estudiar</span>`;
+    }
+    const iconBg = c.blockReviewed ? 'background:#dcfce7;color:#16a34a' : c.blockPending ? 'background:#fef3c7;color:#d97706' : (c.historyReviewed || c.status === 'learned') ? 'background:#f1f5f9;color:#475569' : 'background:#e0f2fe;color:#0284c7';
 
     return `<article class="note-row">
-      <span class="stat-icon" style="${iconBg}">${icon(isLearned ? 'check' : isLearning ? 'flame' : 'layers')}</span>
+      <span class="stat-icon" style="${iconBg}">${icon(c.blockReviewed ? 'check' : c.blockPending ? 'clock' : (c.historyReviewed || c.status === 'learned') ? 'check' : 'layers')}</span>
       <div class="note-content">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
           <h3 style="margin:0">${esc(c.frontText||'Tarjeta multimedia')}</h3>
@@ -805,7 +895,9 @@ function cardsView(favorites=false){
       </div>
     </article>`;
   }).join('')||empty(
-    cardProgressFilter === 'learned' ? 'Aún no has repasado tarjetas aquí.' :
+    cardProgressFilter === 'block-reviewed' ? 'Aún no has repasado tarjetas en este bloque.' :
+    cardProgressFilter === 'block-pending' ? 'No quedan tarjetas pendientes en este bloque.' :
+    cardProgressFilter === 'learned' || cardProgressFilter === 'history' ? 'Aún no has repasado tarjetas antes aquí.' :
     cardProgressFilter === 'learning' ? 'No hay tarjetas en aprendizaje actualmente.' :
     cardProgressFilter === 'new' ? 'No quedan tarjetas nuevas en este mazo.' :
     favorites ? 'Guarda tus ideas favoritas.' : 'Tu biblioteca empieza con una idea.',
@@ -1924,6 +2016,48 @@ function studyView(){
         </div>
       </section>`;
     }
+    if (reviewSession?.blockStatus?.active) {
+      const bs = reviewSession.blockStatus;
+      return `<section class="study-surface study-fullscreen" style="justify-content:center;align-items:center;padding:20px">
+        <div style="max-width:540px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:32px 24px;text-align:center;box-shadow:0 12px 36px rgba(0,0,0,0.08)">
+          <div style="font-size:44px;margin-bottom:12px">🎉</div>
+          <h2 style="margin:0 0 8px;font-size:23px">¡Primera pasada del bloque completada!</h2>
+          <p style="color:var(--muted);font-size:14px;margin-bottom:20px">Has completado las ${bs.total} tarjetas de este bloque de estudio.</p>
+          <div style="background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <div style="font-size:24px;font-weight:700;color:#16a34a">${bs.reviewedCount}</div>
+              <div style="font-size:12px;color:var(--muted)">Tarjetas repasadas</div>
+            </div>
+            <div>
+              <div style="font-size:24px;font-weight:700;color:${bs.againCount ? '#e11d48' : 'var(--text)'}">${bs.againCount || 0}</div>
+              <div style="font-size:12px;color:var(--muted)">Marcadas «Otra vez»</div>
+            </div>
+          </div>
+          ${bs.againDueCount > 0 ? `
+            <div style="background:#fff1f2;border:1px solid #fecdd3;color:#9f1239;border-radius:10px;padding:12px 14px;margin-bottom:20px;font-size:13px;text-align:left">
+              <strong>${bs.againDueCount} repeticiones listas:</strong> Puedes atender ahora las tarjetas que fallaste y cuyo intervalo ya venció.
+            </div>
+          ` : (bs.againCount > 0 ? `
+            <div style="background:var(--bg);border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:10px 14px;margin-bottom:20px;font-size:12px;text-align:left">
+              Tus repeticiones de «Otra vez» están programadas con intervalos espaciados para más tarde (aún no vencidas).
+            </div>
+          ` : '')}
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${bs.againDueCount > 0 ? `
+              <button class="btn btn-primary" data-action="attend-again-reviews" data-id="${selectedDeck||''}">
+                ${icon('clock')} Atender repeticiones disponibles (${bs.againDueCount})
+              </button>
+            ` : ''}
+            <button class="btn btn-primary" data-action="new-block-prompt" data-id="${selectedDeck||''}">
+              ${icon('plus')} Iniciar otro bloque de estudio
+            </button>
+            <button class="btn btn-quiet" data-action="back-decks">
+              ${icon('back')} Volver a los mazos
+            </button>
+          </div>
+        </div>
+      </section>`;
+    }
     return empty('¡Todo al día por ahora!','Has completado tus repasos pendientes. Puedes explorar tus tarjetas o añadir nuevas cuando quieras.','back-decks','Volver a los mazos','check');
   }
   const d=data.decks.find(d=>String(d.id)===String(selectedDeck||c.deckId));
@@ -1938,37 +2072,68 @@ function studyView(){
       <span class="exam-badge">${icon('target')} ${esc(examConfig?.modeLabel || 'EXAMEN')}</span>
       <span style="font-size:13px;font-weight:700;color:var(--muted)">${examResults.completed + 1} de ${examResults.total}</span>
     </div>
+  ` : (reviewSession?.blockStatus?.active ? `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:3px" title="Bloque activo: tarjeta actual, pendientes y repasadas">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700">
+        <span style="color:var(--text)">Tarjeta ${reviewSession.blockStatus.current} de ${reviewSession.blockStatus.total}</span>
+        <span class="c-sep">·</span>
+        <span style="color:var(--muted)">${reviewSession.blockStatus.pending} pendientes</span>
+        <span class="c-sep">·</span>
+        <span style="color:#16a34a">${reviewSession.blockStatus.reviewedCount} repasadas</span>
+      </div>
+      <div style="width:170px;height:5px;background:var(--line);border-radius:10px;overflow:hidden">
+        <div style="width:${reviewSession.blockStatus.progressPct}%;height:100%;background:#0284c7;transition:width .3s ease"></div>
+      </div>
+    </div>
   ` : `
     <div class="anki-top-counts" title="Nuevas (azul) + En aprendizaje (rojo) + Por repasar (verde)"><span class="c-new" title="Nuevas">${newCount}</span><span class="c-sep">+</span><span class="c-learn" title="En aprendizaje">${learnCount}</span><span class="c-sep">+</span><span class="c-due" title="Por repasar">${dueCount}</span></div>
-  `;
+  `);
 
-  return `<section class="study-surface study-fullscreen"><div class="anki-topbar"><div style="display:flex;gap:10px;align-items:center;min-width:0"><button class="anki-side-action" data-action="${isExamSession?'exit-study':'back-decks'}" title="Volver a los mazos (Esc)">${icon('back')}<span>Mazos</span></button><h2 title="${esc(d?.name||'Mazo')}">${isExamSession ? 'Modo Examen · ' + esc(d?.name||'Biblioteca') : esc(d?.name||'4000 Essential English Words')}</h2></div>${centerTopHeader}<div style="display:flex;gap:8px;align-items:center"><button class="icon-button" data-action="replay-audio" aria-label="Repetir audio" title="Repetir audio (R)" style="color:#94a3b8"><svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button><button class="icon-button" data-action="edit-card" data-id="${c.id}" aria-label="Editar tarjeta" title="Editar tarjeta (E)" style="color:#38bdf8">${icon('edit')}</button><button class="icon-button ${c.starred?'starred':''}" data-action="star" data-id="${c.id}" aria-label="Marcar como favorita" title="Marcar como favorita (S)" style="color:#94a3b8">${icon('star')}</button><button class="icon-button" data-action="toggle-fullscreen" aria-label="${isFullscreen?'Salir de pantalla completa':'Pantalla completa'}" title="Pantalla completa (F)" style="color:#94a3b8">${icon(isFullscreen?'shrink':'expand')}</button></div></div><div class="anki-card-container"><iframe class="anki-card-frame" id="study-frame" title="${revealed?'Respuesta':'Pregunta'} de la tarjeta" sandbox="allow-scripts allow-same-origin" allow="autoplay" referrerpolicy="no-referrer"></iframe></div><div class="anki-bottom-bar"><div style="display:flex;gap:8px;align-items:center"><button class="anki-side-action" data-action="edit-card" data-id="${c.id}" title="Editar tarjeta (E)" style="border-color:#0284c7;color:#38bdf8;display:inline-flex;align-items:center;gap:6px">${icon('edit')}<span>Editar (E)</span></button></div><div class="anki-study-center">${c.renderError?`<div style="display:flex;gap:10px;align-items:center"><button class="anki-side-action" data-action="skip-card">Omitir por hoy</button></div>`:revealed?`<div class="anki-rating-grid">${(isExamSession ? ['Fallo', 'Difícil', 'Bien', 'Fácil'] : ['Otra vez','Difícil','Bien','Fácil']).map((label,i)=>`<div class="anki-rate-col"><span class="anki-interval">${esc(intervals[i]||['<1m','<6m','<10m','3d'][i])}</span><button class="anki-rate-button rate-col-${i+1}" data-action="rate" data-rating="${i+1}" ${busy?'disabled':''}><span class="rate-name">${label}</span><kbd>${i+1}</kbd></button></div>`).join('')}</div>`:`<button class="anki-btn-show" data-action="reveal" id="btn-reveal-answer"><span>Mostrar respuesta</span><kbd>Espacio</kbd></button>`}</div><div style="display:flex;gap:8px;align-items:center"><button class="anki-side-action" data-action="replay-audio" title="Repetir audio (R)"><svg class="icon" style="width:15px;height:15px" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> Audio (R)</button></div></div></section>`;
+  return `<section class="study-surface study-fullscreen"><div class="anki-topbar"><div style="display:flex;gap:10px;align-items:center;min-width:0"><button class="anki-side-action" data-action="${isExamSession?'exit-study':'back-decks'}" title="Volver a los mazos (Esc)">${icon('back')}<span>Mazos</span></button><h2 title="${esc(d?.name||'Mazo')}">${isExamSession ? 'Modo Examen · ' + esc(d?.name||'Biblioteca') : esc(d?.name||'4000 Essential English Words')}</h2></div>${centerTopHeader}<div style="display:flex;gap:8px;align-items:center"><button class="icon-button" data-action="replay-audio" aria-label="Repetir audio" title="Repetir audio (R)" style="color:#94a3b8"><svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button><button class="icon-button" data-action="edit-card" data-id="${c.id}" aria-label="Editar tarjeta" title="Editar tarjeta (E)" style="color:#38bdf8">${icon('edit')}</button><button class="icon-button ${c.starred?'starred':''}" data-action="star" data-id="${c.id}" aria-label="Marcar como favorita" title="Marcar como favorita (S)" style="color:#94a3b8">${icon('star')}</button><button class="icon-button" data-action="toggle-fullscreen" aria-label="${isFullscreen?'Salir de pantalla completa':'Pantalla completa'}" title="Pantalla completa (F)" style="color:#94a3b8">${icon(isFullscreen?'shrink':'expand')}</button></div></div><div class="anki-study-stage"><div class="anki-card-container"><iframe class="anki-card-frame" id="study-frame" title="${revealed?'Respuesta':'Pregunta'} de la tarjeta" sandbox="allow-scripts allow-same-origin" allow="autoplay" referrerpolicy="no-referrer"></iframe></div><div class="anki-bottom-bar"><div class="anki-study-center">${c.renderError?`<div style="display:flex;gap:10px;align-items:center"><button class="anki-side-action" data-action="skip-card">Omitir por hoy</button></div>`:revealed?`<div class="anki-rating-grid">${(isExamSession ? ['Fallo', 'Difícil', 'Bien', 'Fácil'] : ['Otra vez','Difícil','Bien','Fácil']).map((label,i)=>`<div class="anki-rate-col"><span class="anki-interval">${esc(intervals[i]||['<1m','<6m','<10m','3d'][i])}</span><button class="anki-rate-button rate-col-${i+1}" data-action="rate" data-rating="${i+1}" ${busy?'disabled':''}><span class="rate-name">${label}</span><kbd>${i+1}</kbd></button></div>`).join('')}</div>`:`<button class="anki-btn-show" data-action="reveal" id="btn-reveal-answer"><span>Mostrar respuesta</span><kbd>Espacio</kbd></button>`}</div></div></div></section>`;
 }
 function render(){document.body.classList.remove('menu-open');document.body.classList.toggle('in-study',view==='study');const focused=$('#global-search')===document.activeElement,pos=$('#global-search')?.selectionStart;app.innerHTML=view==='study'?studyView():shell(view==='decks'?dashboard():view==='cards'?cardsView():view==='favorites'?cardsView(true):view==='stats'?statistics():view==='backups'?backupsView():view==='sync'?syncView():settingsView());if(view==='study'&&currentCard()){const c=currentCard();mountCard($('#study-frame'),c,revealed);const stateKey=`${c.id}_${revealed?'ans':'que'}`;if(lastPlayedKey!==stateKey){lastPlayedKey=stateKey;const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios&&audios.length>0){AudioController.playList(audios);}else{AudioController.stop();}}}else{lastPlayedKey=null;AudioController.stop();}if(focused&&$('#global-search')){try{$('#global-search').focus();$('#global-search').setSelectionRange(pos,pos);}catch{}}}
 
-function safeCardHTML(html){const template=document.createElement('template');template.innerHTML=html||'';const doc=template.content;doc.querySelectorAll('script,iframe,object,embed,form,input,button,textarea,select,base,link,meta').forEach(e=>e.remove());doc.querySelectorAll('audio').forEach(audio=>{let src=audio.getAttribute('src');if(!src){const source=audio.querySelector('source');if(source)src=source.getAttribute('src');}if(!src)return;try{const u=new URL(src,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))src=u.href;}catch{}const btn=document.createElement('button');btn.type='button';btn.className='anki-audio-pill';btn.setAttribute('data-src',src);btn.setAttribute('aria-label','Reproducir audio');btn.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg> <span>Audio</span>';audio.replaceWith(btn);});doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]){if(/^on/i.test(a.name)||['srcdoc','action','formaction','srcset','autoplay'].includes(a.name))el.removeAttribute(a.name);if(['href','xlink:href'].includes(a.name)&&!a.value.startsWith('#')){if(el.namespaceURI==='http://www.w3.org/2000/svg'&&el.localName==='image'){try{const u=new URL(a.value,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))el.setAttribute(a.name,u.href);else el.removeAttribute(a.name);}catch{el.removeAttribute(a.name);}}else el.removeAttribute(a.name);}if(['src','poster'].includes(a.name)){if(/^(data:(image|audio)\/)/i.test(a.value))continue;try{const url=new URL(a.value,location.origin+'/media/');if(url.origin!==location.origin||!url.pathname.startsWith('/media/'))el.removeAttribute(a.name);else el.setAttribute(a.name,url.href);}catch{el.removeAttribute(a.name);}}}});if(typeof window.renderMathInElement==='function'){window.renderMathInElement(template.content,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false},{left:'$$',right:'$$',display:true}],throwOnError:false,trust:false,maxExpand:1000,maxSize:20,strict:'ignore'});}return template.innerHTML;}
+function safeCardHTML(html){const template=document.createElement('template');template.innerHTML=html||'';const doc=template.content;doc.querySelectorAll('script,iframe,object,embed,form,input,button,textarea,select,base,link,meta').forEach(e=>e.remove());doc.querySelectorAll('audio').forEach(audio=>{let src=audio.getAttribute('src');if(!src){const source=audio.querySelector('source');if(source)src=source.getAttribute('src');}if(!src)return;try{const u=new URL(src,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))src=u.href;}catch{}const btn=document.createElement('button');btn.type='button';btn.className='anki-audio-pill';btn.setAttribute('data-src',src);btn.setAttribute('aria-label','Reproducir audio');btn.setAttribute('title','Reproducir audio');btn.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';const media=document.createElement('audio');media.className='anki-audio-media';media.preload='auto';media.crossOrigin='anonymous';media.src=src;btn.appendChild(media);audio.replaceWith(btn);});doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]){if(/^on/i.test(a.name)||['srcdoc','action','formaction','srcset','autoplay'].includes(a.name))el.removeAttribute(a.name);if(['href','xlink:href'].includes(a.name)&&!a.value.startsWith('#')){if(el.namespaceURI==='http://www.w3.org/2000/svg'&&el.localName==='image'){try{const u=new URL(a.value,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))el.setAttribute(a.name,u.href);else el.removeAttribute(a.name);}catch{el.removeAttribute(a.name);}}else el.removeAttribute(a.name);}if(['src','poster'].includes(a.name)){if(/^(data:(image|audio)\/)/i.test(a.value))continue;try{const url=new URL(a.value,location.origin+'/media/');if(url.origin!==location.origin||!url.pathname.startsWith('/media/'))el.removeAttribute(a.name);else el.setAttribute(a.name,url.href);}catch{el.removeAttribute(a.name);}}}});if(typeof window.renderMathInElement==='function'){window.renderMathInElement(template.content,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false},{left:'$$',right:'$$',display:true}],throwOnError:false,trust:false,maxExpand:1000,maxSize:20,strict:'ignore'});}return template.innerHTML;}
 const CARD_THEMES = {
   clean: { name: 'Lumina Clean', desc: 'Blanco luminoso, lectura descansada', bg: '#ffffff', text: '#1e293b', hr: '#e2e8f0', cloze: '#4f46e5', swatch: '#ffffff', swatchBorder: '#94a3b8', isDark: false },
-  quizlet: { name: 'Quizlet Indigo Plus', desc: 'Azul noche con acentos índigo', bg: '#0f172a', text: '#f8fafc', hr: '#334155', cloze: '#818cf8', swatch: '#0f172a', swatchBorder: '#6366f1', isDark: true },
+  indigo: { name: 'Lumcards Índigo', desc: 'Azul noche con acentos índigo', bg: '#0f172a', text: '#f8fafc', hr: '#334155', cloze: '#818cf8', swatch: '#0f172a', swatchBorder: '#6366f1', isDark: true },
   oled: { name: 'Dark OLED', desc: 'Negro absoluto con detalles cian', bg: '#000000', text: '#f1f5f9', hr: '#27272a', cloze: '#38bdf8', swatch: '#000000', swatchBorder: '#0284c7', isDark: true },
   sepia: { name: 'Pergamino Editorial', desc: 'Tono sepia cálido con serif clásica', bg: '#fbf7ee', text: '#292524', hr: '#e7e0d3', cloze: '#d97706', swatch: '#fbf7ee', swatchBorder: '#d97706', isDark: false },
   aurora: { name: 'Aurora Glass', desc: 'Pizarra oscura con toques esmeralda', bg: '#0a101d', text: '#f0fdf4', hr: '#1e293b', cloze: '#34d399', swatch: '#0a101d', swatchBorder: '#10b981', isDark: true },
   zen: { name: 'Zen Minimalista', desc: 'Monocromo sin ninguna distracción', bg: '#18181b', text: '#e4e4e7', hr: '#27272a', cloze: '#a1a1aa', swatch: '#18181b', swatchBorder: '#52525b', isDark: true }
 };
+// Retrocompatibilidad con preferencias guardadas anteriores
+CARD_THEMES.quizlet = CARD_THEMES.indigo;
 
 function getCardCustomStyle() {
   try {
     const saved = localStorage.getItem('lumcards-card-style');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.theme === 'quizlet') {
+        parsed.theme = 'indigo';
+        try { localStorage.setItem('lumcards-card-style', JSON.stringify(parsed)); } catch {}
+      }
+      return {
+        theme: parsed.theme || 'clean',
+        font: parsed.font || 'sans',
+        size: parsed.size || '22px',
+        align: parsed.align || 'center',
+        cloze: parsed.cloze || '#6558d9',
+        templateMode: parsed.templateMode || 'lumcards'
+      };
+    }
   } catch {}
-  return { theme: 'clean', font: 'sans', size: '22px', align: 'center', cloze: '#6558d9' };
+  return { theme: 'clean', font: 'sans', size: '22px', align: 'center', cloze: '#6558d9', templateMode: 'lumcards' };
 }
 
-function mountCard(frame,card,answer=false){
-  if(!frame)return;
+
+function mountCard(frame,card,answer=false,customOverride=null,interactiveAudio=true){
+  if(!frame||!card)return;
   const origin=location.origin;
-  const styleConf = getCardCustomStyle();
-  const theme = CARD_THEMES[styleConf.theme] || CARD_THEMES.quizlet;
+  const styleConf = customOverride || getCardCustomStyle();
+  const rawThemeKey = styleConf.theme === 'quizlet' ? 'indigo' : (styleConf.theme || 'clean');
+  const theme = CARD_THEMES[rawThemeKey] || CARD_THEMES.indigo || CARD_THEMES.clean;
   const fontFamilies = {
     sans: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     serif: "Georgia, 'Charter', 'Times New Roman', serif",
@@ -1980,15 +2145,345 @@ function mountCard(frame,card,answer=false){
   const textAlign = styleConf.align || 'center';
   const clozeColor = styleConf.cloze || theme.cloze;
   const colorScheme = theme.isDark ? 'dark' : 'light';
+  const templateMode = styleConf.templateMode || 'lumcards';
 
-  frame.srcdoc=`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${origin}/vendor/katex/; img-src ${origin}/media/ data:; media-src ${origin}/media/ data:; font-src ${origin}/media/ ${origin}/vendor/katex/ data:; script-src 'unsafe-inline'; form-action 'none'; base-uri ${origin}"><base href="${origin}/media/"><link rel="stylesheet" href="${origin}/vendor/katex/katex.min.css"><style>html{color-scheme:${colorScheme};height:100%;width:100%;background:${theme.bg};box-sizing:border-box}body{font-family:${fontFamily};color:${theme.text};background:${theme.bg};margin:0;padding:24px 32px;font-size:clamp(16px,1.8vw,${fontSize});text-align:${textAlign};line-height:1.55;overflow-wrap:anywhere;min-height:100%;width:100%;display:flex;flex-direction:column;justify-content:center;align-items:${textAlign==='center'?'center':'flex-start'};box-sizing:border-box;user-select:none;cursor:pointer}.card{font-family:${fontFamily};color:${theme.text};background:${theme.bg};width:100%;max-width:1100px;margin:0 auto}img{max-width:90%;max-height:44vh;object-fit:contain;height:auto;border-radius:8px;margin:12px auto;display:block}hr{border:0;border-top:1px solid ${theme.hr};margin:16px auto;width:92%}.cloze{color:${clozeColor};font-weight:700;padding:0 2px;border-bottom:2px solid ${clozeColor}}pre{white-space:pre-wrap;text-align:left;max-width:90%;margin:0 auto}p{margin:8px 0}*{box-sizing:border-box}.anki-audio-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:${theme.isDark?'#1e293b':'#f1f5f9'};color:${theme.isDark?'#38bdf8':'#0284c7'};border:1px solid ${theme.isDark?'#0284c7':'#cbd5e1'};cursor:pointer;font-size:13px;font-weight:600;margin:6px 8px;vertical-align:middle;box-shadow:0 2px 6px rgba(0,0,0,0.15);transition:all .15s ease}.anki-audio-pill:hover{background:#0284c7;color:#ffffff;transform:scale(1.05)}.anki-audio-pill:active{transform:scale(0.95)}.anki-audio-pill svg{width:16px;height:16px;fill:currentColor}</style>${card.css?'<style>'+String(card.css).replace(/<\/style/gi,'')+'</style>':''}<script>window.addEventListener('keydown',function(e){var k=e.key,c=e.code;if(c==='Space'||k===' '||c==='Enter'||k==='Enter'||/^[1-4]$/.test(k)||['f','F','Escape','s','S','e','E','r','R'].includes(k)){e.preventDefault();}window.parent.postMessage({ankiKey:k,ankiCode:c},'*');});document.addEventListener('click',function(e){var pill=e.target.closest('.anki-audio-pill, .anki-audio-btn');if(pill){e.preventDefault();e.stopPropagation();var src=pill.getAttribute('data-src');if(src)window.parent.postMessage({ankiPlayAudio:src},'*');return;}if(e.target.closest('a, button, input, textarea, select'))return;window.parent.postMessage({ankiCardClick:true},'*');});</script></head><body class="card">${safeCardHTML(answer?card.back:card.front)}</body></html>`;
+  const cardHtml = safeCardHTML(answer ? card.back : card.front);
+  const plainText = (cardHtml || '').replace(/<[^>]+>/g, '').trim();
+  const hasImage = (cardHtml || '').includes('<img');
+  const isShort = plainText.length > 0 && plainText.length <= 150 && !plainText.includes('\n\n') && (plainText.match(/\n/g) || []).length <= 2;
+  const enforceColors = templateMode === 'lumcards' && card.id !== 'choice_preview' && card.id !== 'write_preview';
+
+  // Only load runtime message/event handlers during active study to keep preview strictly isolated
+  const scriptTag = interactiveAudio ? `<script defer src="${origin}/card-runtime.js"></script>` : '';
+
+  const shortFontSize = styleConf.size ? `clamp(18px, 2.5vw, ${styleConf.size})` : (hasImage ? 'clamp(18px,2.2vw,26px)' : 'clamp(24px,3.2vw,38px)');
+
+  const baseCardCss = templateMode === 'original' && card.css ? '' : `
+.card{font-family:${fontFamily};color:${theme.text};background:${theme.bg};width:100%;min-height:100%;flex:1;margin:0;padding:clamp(16px,2.8vh,32px) clamp(16px,2.8vw,36px);box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch}
+.card-content-wrapper{width:100%;max-width:860px;box-sizing:border-box;text-align:${textAlign};line-height:1.45;overflow-wrap:anywhere;word-break:break-word}
+.card:has(.card-short), .card.card-short{justify-content:safe center}
+.card-content-wrapper.card-short{margin:auto;font-size:${shortFontSize};line-height:1.35;font-weight:550}
+.card:has(.card-long), .card.card-long{justify-content:flex-start}
+.card-content-wrapper.card-long{margin:0 auto;font-size:clamp(15px,1.6vw,${fontSize});line-height:1.5}
+`;
+
+  const lumcardsEnforcementCss = enforceColors ? `
+<style>
+/* Enforce Lumcards theme precedence over imported card styles */
+body.anki-card-body>.card{width:100%!important;max-width:none!important;min-height:100%!important}
+html,body.anki-card-body,body.anki-card-body>.card{background-color:${theme.bg}!important;color:${theme.text}!important}
+body.anki-card-body a{color:${theme.isDark?'#38bdf8':'#0284c7'}!important}
+body.anki-card-body .card-content-wrapper :is(p,div,span,font,em,strong,b,i,u,h1,h2,h3,h4,h5,h6):not(.cloze,.cloze *,.katex,.katex *,svg,svg *,.anki-audio-pill,.anki-audio-pill *){color:inherit!important;background-color:transparent!important}
+</style>
+` : `
+<style>
+body.anki-card-body>.card{width:100%!important;max-width:none!important;min-height:100%!important}
+html,body.anki-card-body{width:100%!important;max-width:none!important;min-height:100%!important}
+</style>
+`;
+
+  frame.srcdoc=`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${origin}/vendor/katex/; img-src ${origin}/media/ data:; media-src ${origin}/media/ data:; font-src ${origin}/media/ ${origin}/vendor/katex/ data:; script-src ${origin}; form-action 'none'; base-uri ${origin}"><base href="${origin}/media/"><link rel="stylesheet" href="${origin}/vendor/katex/katex.min.css"><style>
+html{color-scheme:${colorScheme};height:100%;width:100%;background:${theme.bg};box-sizing:border-box;margin:0;padding:0}
+body{font-family:${fontFamily};color:${theme.text};background:${theme.bg};margin:0;padding:0;font-size:clamp(15px,1.6vw,${fontSize});text-align:${textAlign};line-height:1.45;overflow-wrap:anywhere;word-break:break-word;width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;box-sizing:border-box;user-select:none;cursor:pointer;overflow-y:auto;overflow-x:hidden}
+${baseCardCss}
+img{max-width:90%;max-height:clamp(160px,32vh,360px);object-fit:contain;height:auto;border-radius:8px;margin:clamp(6px,1.5vh,10px) auto;display:block}
+hr{border:0;border-top:1px solid ${theme.hr};margin:clamp(8px,1.8vh,14px) auto;width:92%}
+.cloze{color:${clozeColor};font-weight:700;padding:0 2px;border-bottom:2px solid ${clozeColor}}
+pre{white-space:pre-wrap;text-align:left;max-width:90%;margin:0 auto;overflow-x:auto}
+p{margin:clamp(4px,1vh,8px) 0}
+*{box-sizing:border-box}
+.anki-audio-pill{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;min-width:38px;min-height:38px;border-radius:50%;padding:0;background:${theme.isDark?'#1e293b':'#f1f5f9'};color:${theme.isDark?'#38bdf8':'#0284c7'};border:1.5px solid ${theme.isDark?'#0284c7':'#cbd5e1'};cursor:pointer;margin:6px 8px;vertical-align:middle;box-shadow:0 2px 6px rgba(0,0,0,0.15);transition:all .15s ease}
+.anki-audio-pill:hover{background:#0284c7;color:#ffffff;transform:scale(1.08)}
+.anki-audio-pill:active{transform:scale(0.92)}
+.anki-audio-pill.playing{background:#0284c7;color:#ffffff;box-shadow:0 0 0 3px rgba(56,189,248,.28)}
+.anki-audio-pill:focus-visible{outline:2px solid #38bdf8;outline-offset:2px}
+.anki-audio-pill svg{width:18px;height:18px;fill:currentColor;display:block}
+</style>
+${card.css?'<style>'+String(card.css).replace(/<\/style/gi,'')+'</style>':''}
+${lumcardsEnforcementCss}
+${scriptTag}</head><body class="anki-card-body"><main class="card"><div class="card-content-wrapper ${isShort?'card-short':'card-long'}">${cardHtml}</div></main></body></html>`;
 }
-function showModal(title,intro,content){modal.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Cerrar">${icon('close')}</button></div><p class="dialog-intro">${intro}</p>${content}`;if(!modal.open)modal.showModal();}
-function newDeck(){showModal('Un nuevo espacio para aprender.','Elige un nombre que te ayude a encontrar tus tarjetas.',`<form id="deck-form"><label class="field">Nombre del mazo<input name="name" placeholder="Por ejemplo: Inglés para viajar" required maxlength="120" autofocus></label><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('plus')}Crear mazo</button></div></form>`);}
-function newFolderModal(){showModal('Nueva carpeta para organizar libros','Crea una carpeta contenedora para agrupar varios libros o submazos en un solo lugar.',`<form id="folder-form"><label class="field">Nombre de la carpeta<input name="name" placeholder="Por ejemplo: 4000 Essential English Words" required maxlength="120" autofocus></label><div class="info-box">Dentro de esta carpeta podrás colocar libros (por ej. <strong>1.Book</strong>, <strong>2.Book</strong>...) o mover libros ya creados para mantener tu pantalla ordenada.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('folder')}Crear carpeta</button></div></form>`);}
-function renameDeckModal(deckId){const d=data.decks.find(x=>String(x.id)===String(deckId));if(!d)return;const kind=d.isFolder?'carpeta':'mazo';showModal('Renombrar '+kind,`Cambia el nombre de «${esc(d.shortName||d.name)}».`,`<form id="rename-deck-form" data-id="${d.id}" data-kind="${kind}"><label class="field">Nuevo nombre<input name="name" value="${esc(d.shortName||d.name)}" required maxlength="120" autofocus></label><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('edit')}Guardar nombre</button></div></form>`);}
+function showModal(title,intro,content,customClass=''){modal.className=customClass;modal.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Cerrar">${icon('close')}</button></div><p class="dialog-intro">${intro}</p>${content}`;if(!modal.open)modal.showModal();}
+function renderDeckPreviewBox(d) {
+  return `<div class="card-preview-container">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--muted);text-transform:uppercase">Vista previa en biblioteca (muestra inerte)</div>
+    <div id="deck-live-preview" class="deck-preview-inert" aria-hidden="true">${deckCard(d, 0, true)}</div>
+    <p class="small muted" style="margin:4px 0 0;text-align:center">Refleja exactamente cómo se verá en tu biblioteca.</p>
+  </div>`;
+}
+
+function newDeck(){
+  const previewData = { id: 'preview', name: 'Nuevo mazo', shortName: 'Nuevo mazo', isFolder: false, total: 0, new: 0, due: 0, learned: 0 };
+  showModal('Un nuevo espacio para aprender.','Elige un nombre que te ayude a encontrar tus tarjetas.',`
+    <div class="deck-modal-grid">
+      <form id="deck-form">
+        <label class="field">Nombre del mazo
+          <input name="name" id="deck-name-input" placeholder="Por ejemplo: Inglés para viajar" required maxlength="120" autofocus>
+        </label>
+        <div class="form-error" role="alert"></div>
+        <div class="form-footer">
+          ${button('Cancelar','close-modal')}
+          <button class="btn btn-primary" data-mutate>${icon('plus')}Crear mazo</button>
+        </div>
+      </form>
+      ${renderDeckPreviewBox(previewData)}
+    </div>
+  `, 'dialog-deck-modal');
+  const deckInput = $('#deck-name-input');
+  const deckMount = $('#deck-live-preview');
+  if (deckInput && deckMount) {
+    deckInput.addEventListener('input', () => {
+      const val = deckInput.value.trim() || 'Nuevo mazo';
+      deckMount.innerHTML = deckCard({ ...previewData, name: val, shortName: val }, 0, true);
+    });
+  }
+}
+
+function newFolderModal(){
+  const previewData = { id: 'preview', name: 'Nueva carpeta', shortName: 'Nueva carpeta', isFolder: true, total: 0, new: 0, due: 0, learned: 0 };
+  showModal('Nueva carpeta para organizar libros','Crea una carpeta contenedora para agrupar varios libros o submazos en un solo lugar.',`
+    <div class="deck-modal-grid">
+      <form id="folder-form">
+        <label class="field">Nombre de la carpeta
+          <input name="name" id="folder-name-input" placeholder="Por ejemplo: 4000 Essential English Words" required maxlength="120" autofocus>
+        </label>
+        <div class="info-box">Dentro de esta carpeta podrás colocar libros (por ej. <strong>1.Book</strong>, <strong>2.Book</strong>...) o mover libros ya creados para mantener tu pantalla ordenada.</div>
+        <div class="form-error" role="alert"></div>
+        <div class="form-footer">
+          ${button('Cancelar','close-modal')}
+          <button class="btn btn-primary" data-mutate>${icon('folder')}Crear carpeta</button>
+        </div>
+      </form>
+      ${renderDeckPreviewBox(previewData)}
+    </div>
+  `, 'dialog-deck-modal');
+  const folderInput = $('#folder-name-input');
+  const folderMount = $('#deck-live-preview');
+  if (folderInput && folderMount) {
+    folderInput.addEventListener('input', () => {
+      const val = folderInput.value.trim() || 'Nueva carpeta';
+      folderMount.innerHTML = deckCard({ ...previewData, name: val, shortName: val }, 0, true);
+    });
+  }
+}
+
+function renameDeckModal(deckId){
+  const d=data.decks.find(x=>String(x.id)===String(deckId));
+  if(!d)return;
+  const kind=d.isFolder?'carpeta':'mazo';
+  const previewData = { ...d };
+  showModal('Renombrar '+kind,`Cambia el nombre de «${esc(d.shortName||d.name)}».`,`
+    <div class="deck-modal-grid">
+      <form id="rename-deck-form" data-id="${d.id}" data-kind="${kind}">
+        <label class="field">Nuevo nombre
+          <input name="name" id="rename-deck-input" value="${esc(d.shortName||d.name)}" required maxlength="120" autofocus>
+        </label>
+        <div class="form-error" role="alert"></div>
+        <div class="form-footer">
+          ${button('Cancelar','close-modal')}
+          <button class="btn btn-primary" data-mutate>${icon('edit')}Guardar nombre</button>
+        </div>
+      </form>
+      ${renderDeckPreviewBox(previewData)}
+    </div>
+  `, 'dialog-deck-modal');
+  const renameInput = $('#rename-deck-input');
+  const renameMount = $('#deck-live-preview');
+  if (renameInput && renameMount) {
+    renameInput.addEventListener('input', () => {
+      const val = renameInput.value.trim() || (d.shortName || d.name);
+      renameMount.innerHTML = deckCard({ ...previewData, name: val, shortName: val }, 0, true);
+    });
+  }
+}
+
 function moveDeckModal(deckId){const d=data.decks.find(x=>String(x.id)===String(deckId));if(!d)return;const folders=data.decks.filter(x=>x.isFolder&&!x.parentName&&String(x.id)!==String(d.id));showModal('Mover libro a una carpeta',`Organiza «${esc(d.shortName||d.name)}» dentro de una carpeta contenedora.`,`<form id="move-deck-form" data-id="${d.id}"><label class="field">Carpeta de destino<select name="parentId"><option value="root">Ninguna (Dejar como mazo suelto en la raíz)</option>${folders.map(f=>`<option value="${f.id}" ${f.name===d.parentName?'selected':''}>📁 ${esc(f.name)}</option>`).join('')}</select></label><div class="info-box">Al colocar el libro dentro de una carpeta, se agrupará en la pantalla principal para que no tengas libros dispersos.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('check')}Mover libro</button></div></form>`);}
 function newBookInFolderModal(folderName){showModal('Añadir libro a '+esc(folderName),'Crea un nuevo libro o submazo directamente dentro de esta carpeta.',`<form id="new-book-form" data-folder="${esc(folderName)}"><label class="field">Nombre del libro<input name="bookName" placeholder="Por ejemplo: 1.Book, Unidad 1, Lección A..." required maxlength="100" autofocus></label><div class="info-box">El libro se creará automáticamente dentro de <strong>${esc(folderName)}</strong>.</div><div class="form-error" role="alert"></div><div class="form-footer">${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('plus')}Crear libro en carpeta</button></div></form>`);}
+
+async function cardForm(id){
+  const cardId=id||currentCard()?.id;
+  const c=cardId?await api('cards/'+encodeURIComponent(cardId)):null;
+  if(!data.decks.length){newDeck();return;}
+  let draft=null;try{draft=!c?JSON.parse(localStorage.getItem('anki2-draft')||'null'):null;}catch{}
+  const sourceFields=c?.fields||[{name:'Pregunta · anverso',value:draft?.front||''},{name:'Respuesta · reverso',value:draft?.back||''}];
+  const fields=sourceFields.map((f,i)=>`<label class="field"><span class="field-label" style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;margin-bottom:6px"><span>${esc(f.name)}</span></span><textarea name="${c?'field_'+i:i===0?'front':'back'}" id="card-field-${i}" ${!c&&i===0?'required':''} placeholder="${i===0?'¿Qué quieres recordar?':'Escribe el contenido…'}" rows="${sourceFields.length>3?3:4}" style="width:100%;font-size:14px;padding:10px;border-radius:8px">${esc(f.value)}</textarea></label>`).join('');
+
+  showModal(c?'Editar tarjeta':'Captura algo que quieras recordar.',c?`Nota: ${esc(c.modelName)} · Se guardará directamente en esta pestaña sin salir.`:'Elige una pregunta concreta y una respuesta que puedas recordar.',`
+    <div class="mobile-tab-bar">
+      <button type="button" class="btn btn-quiet active" id="card-tab-edit">Editar contenido</button>
+      <button type="button" class="btn btn-quiet" id="card-tab-preview">Vista previa interactiva</button>
+    </div>
+    <div class="editor-split-grid" style="align-items:stretch">
+      <div id="card-form-col">
+        <form id="card-form" data-id="${c?.id||''}" data-fields="${sourceFields.length}">
+          ${!c?`<div class="editor-options"><label class="field">Mazo<select name="deckId">${data.decks.map(d=>`<option value="${d.id}" ${String(d.id)===String(selectedDeck||draft?.deckId)?'selected':''}>${esc(d.name)}</option>`).join('')}</select></label><label class="field">Tipo de tarjeta<select name="kind" id="note-kind"><option value="basic">Pregunta y respuesta</option><option value="reversed" ${draft?.kind==='reversed'?'selected':''}>En ambos sentidos</option><option value="cloze" ${draft?.kind==='cloze'?'selected':''}>Completar espacios · cloze</option></select></label></div>`:''}
+          <div class="editor-toolbar">
+            ${button('Añadir imagen o audio','attach-media','upload','btn-quiet')}
+            ${(!c||(c.isCloze&&!c.isImageOcclusion))?button('Ocultar texto','insert-cloze','edit','btn-quiet'):''}
+          </div>
+          ${fields}
+          <p class="info-box" id="editor-tip">Puedes editar el texto o HTML. Pulsa <kbd>Ctrl + Enter</kbd> para guardar rápido sin salir de la pestaña.</p>
+          <label class="field"><span class="field-label">Etiquetas</span><input name="tags" value="${esc(c?.tags?.join(' ')??draft?.tags??'')}" placeholder="vocabulario examen capítulo1"></label>
+          <div class="form-error" role="alert"></div>
+          <div class="form-footer">
+            ${c?button('Eliminar nota','delete-card','trash','btn-danger',`data-id="${c.id}"`):''}
+            ${button('Cancelar','close-modal')}
+            <button class="btn btn-primary" data-mutate>${icon('check')}${c?'Guardar cambios (Ctrl+Enter)':'Crear tarjeta'}</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="card-preview-col" class="card-preview-container">
+        <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--muted);text-transform:uppercase">Vista previa</span>
+            <select id="card-preview-mode-select" style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--bg);border:1px solid var(--line);color:var(--text);cursor:pointer">
+              <option value="card" selected>Tarjeta (Repaso)</option>
+              <option value="choice">Modo Elegir</option>
+              <option value="write">Modo Escribir</option>
+            </select>
+          </div>
+          <button type="button" class="styler-flip-pill" id="card-form-flip-btn" title="Alternar entre anverso y reverso">
+            ${icon('spark')} <span id="card-form-flip-label">Ver reverso</span>
+          </button>
+        </div>
+        <div style="width:100%;flex:1;min-height:340px;position:relative;display:flex">
+          <iframe class="card-frame card-live-preview-frame" id="card-editor-preview-frame" title="Vista previa en tiempo real de la tarjeta" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
+        </div>
+        <p class="small muted" style="margin:4px 0 0;text-align:center">Actualización al escribir. Sin audio automático ni cambios al progreso.</p>
+      </div>
+    </div>
+  `, 'dialog-card-editor');
+
+  updateEditorKind();
+
+  setTimeout(() => {
+    let isFlipped = false;
+    let previewMode = 'card';
+    const frame = $('#card-editor-preview-frame');
+    const flipBtn = $('#card-form-flip-btn');
+    const flipLabel = $('#card-form-flip-label');
+    const modeSelect = $('#card-preview-mode-select');
+    const tabEdit = $('#card-tab-edit');
+    const tabPreview = $('#card-tab-preview');
+    const formCol = $('#card-form-col');
+    const previewCol = $('#card-preview-col');
+
+    const handleResize = () => {
+      if (!formCol || !previewCol) return;
+      if (window.innerWidth > 820) {
+        formCol.style.display = 'block';
+        previewCol.style.display = 'flex';
+      } else {
+        if (tabEdit?.classList.contains('active')) {
+          formCol.style.display = 'block';
+          previewCol.style.display = 'none';
+        } else {
+          formCol.style.display = 'none';
+          previewCol.style.display = 'flex';
+        }
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    modal.addEventListener('close', () => {
+      window.removeEventListener('resize', handleResize);
+    }, { once: true });
+
+    if (tabEdit && tabPreview && formCol && previewCol) {
+      tabEdit.addEventListener('click', () => {
+        tabEdit.classList.add('active');
+        tabPreview.classList.remove('active');
+        formCol.style.display = 'block';
+        previewCol.style.display = 'none';
+      });
+      tabPreview.addEventListener('click', () => {
+        tabPreview.classList.add('active');
+        tabEdit.classList.remove('active');
+        formCol.style.display = 'none';
+        previewCol.style.display = 'flex';
+        updateCardLivePreview();
+      });
+      handleResize();
+    }
+
+    if (modeSelect) {
+      modeSelect.addEventListener('change', e => {
+        previewMode = e.target.value;
+        if (flipBtn) flipBtn.style.display = previewMode === 'card' ? 'inline-flex' : 'none';
+        updateCardLivePreview();
+      });
+    }
+
+    let debounceTimer = null;
+    const updateCardLivePreview = () => {
+      if (!frame) return;
+      const frontInput = $('#card-field-0')?.value || '';
+      const backInput = $('#card-field-1')?.value || '';
+      const kind = $('#note-kind')?.value || 'basic';
+
+      let frontHtml = frontInput.trim() || '<em>(Escribe una pregunta para ver el anverso)</em>';
+      let backHtml = backInput.trim() || '<em>(Escribe una respuesta para ver el reverso)</em>';
+
+      if (kind === 'cloze' && frontInput) {
+        frontHtml = frontInput.replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, '<span class="cloze">[$2 || ...]</span>');
+        backHtml = frontInput.replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, '<span class="cloze">$1</span>') + (backInput ? `<hr><p>${backInput}</p>` : '');
+      }
+
+      if (previewMode === 'choice') {
+        const choiceContent = `<div style="text-align:center;padding:16px 12px">
+          <span style="font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:10px">Vista Modo Elegir</span>
+          <div style="font-size:1.15em;font-weight:600;margin-bottom:16px">${frontHtml}</div>
+          <div style="display:grid;gap:8px;max-width:320px;margin:0 auto;text-align:left">
+            <div style="padding:10px 14px;border-radius:8px;border:1.5px solid #6366f1;background:#eef2ff;color:#4338ca;font-weight:600">✓ ${backHtml} <span style="font-size:11px;float:right;opacity:0.8">(Correcta)</span></div>
+            <div style="padding:10px 14px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;color:#64748b;opacity:0.85">Opción alternativa A</div>
+            <div style="padding:10px 14px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;color:#64748b;opacity:0.85">Opción alternativa B</div>
+          </div>
+        </div>`;
+        mountCard(frame, { id: 'choice_preview', front: choiceContent, back: choiceContent, css: '' }, false, null, false);
+        return;
+      }
+
+      if (previewMode === 'write') {
+        const writeContent = `<div style="text-align:center;padding:16px 12px">
+          <span style="font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:10px">Vista Modo Escribir</span>
+          <div style="font-size:1.15em;font-weight:600;margin-bottom:16px">${frontHtml}</div>
+          <div style="max-width:320px;margin:0 auto">
+            <div style="padding:10px 14px;border-radius:8px;border:1.5px dashed #94a3b8;background:#f8fafc;color:#94a3b8;font-size:13px;text-align:left;margin-bottom:8px">Escribe la respuesta aquí…</div>
+            <div style="font-size:12px;color:#64748b;text-align:left">Respuesta esperada: <strong>${backHtml}</strong></div>
+          </div>
+        </div>`;
+        mountCard(frame, { id: 'write_preview', front: writeContent, back: writeContent, css: '' }, false, null, false);
+        return;
+      }
+
+      const tempCard = {
+        id: c?.id || 'live_draft',
+        front: frontHtml,
+        back: backHtml,
+        css: c?.css || ''
+      };
+      if (flipLabel) flipLabel.textContent = isFlipped ? 'Ver anverso' : 'Ver reverso';
+      mountCard(frame, tempCard, isFlipped, null, false);
+    };
+
+    if (flipBtn) {
+      flipBtn.addEventListener('click', () => {
+        isFlipped = !isFlipped;
+        updateCardLivePreview();
+      });
+    }
+
+    const form = $('#card-form');
+    if (form) {
+      form.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(updateCardLivePreview, 80);
+      });
+    }
+    $('#note-kind')?.addEventListener('change', updateCardLivePreview);
+    updateCardLivePreview();
+  }, 40);
+}
 
 function examModal(preselectedDeckId){
   const currentDeck = preselectedDeckId || selectedDeck || 'all';
@@ -2086,20 +2581,159 @@ async function startExam(deckId, mode, limit, alterScheduler = false){
 }
 
 
-async function cardForm(id){
-  const cardId=id||currentCard()?.id;
-  const c=cardId?await api('cards/'+encodeURIComponent(cardId)):null;
-  if(!data.decks.length){newDeck();return;}
-  let draft=null;try{draft=!c?JSON.parse(localStorage.getItem('anki2-draft')||'null'):null;}catch{}
-  const sourceFields=c?.fields||[{name:'Pregunta · anverso',value:draft?.front||''},{name:'Respuesta · reverso',value:draft?.back||''}];
-  const fields=sourceFields.map((f,i)=>`<label class="field"><span class="field-label" style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;margin-bottom:6px"><span>${esc(f.name)}</span></span><textarea name="${c?'field_'+i:i===0?'front':'back'}" ${!c&&i===0?'required':''} placeholder="${i===0?'¿Qué quieres recordar?':'Escribe el contenido…'}" rows="${sourceFields.length>3?3:4}" style="width:100%;font-size:14px;padding:10px;border-radius:8px">${esc(f.value)}</textarea></label>`).join('');
-  showModal(c?'Editar tarjeta':'Captura algo que quieras recordar.',c?`Nota: ${esc(c.modelName)} · Se guardará directamente en esta pestaña sin salir.`:'Elige una pregunta concreta y una respuesta que puedas recordar.',`<form id="card-form" data-id="${c?.id||''}" data-fields="${sourceFields.length}">${!c?`<div class="editor-options"><label class="field">Mazo<select name="deckId">${data.decks.map(d=>`<option value="${d.id}" ${String(d.id)===String(selectedDeck||draft?.deckId)?'selected':''}>${esc(d.name)}</option>`).join('')}</select></label><label class="field">Tipo de tarjeta<select name="kind" id="note-kind"><option value="basic">Pregunta y respuesta</option><option value="reversed" ${draft?.kind==='reversed'?'selected':''}>En ambos sentidos</option><option value="cloze" ${draft?.kind==='cloze'?'selected':''}>Completar espacios · cloze</option></select></label></div>`:''}<div class="editor-toolbar">${button('Añadir imagen o audio','attach-media','upload','btn-quiet')}${(!c||(c.isCloze&&!c.isImageOcclusion))?button('Ocultar texto','insert-cloze','edit','btn-quiet'):''}</div>${fields}<p class="info-box" id="editor-tip">Puedes editar el texto o HTML. Pulsa <kbd>Ctrl + Enter</kbd> para guardar rápido sin salir de la pestaña.</p><label class="field"><span class="field-label">Etiquetas</span><input name="tags" value="${esc(c?.tags?.join(' ')??draft?.tags??'')}" placeholder="vocabulario examen capítulo1"></label><div class="form-error" role="alert"></div><div class="form-footer">${c?button('Eliminar nota','delete-card','trash','btn-danger',`data-id="${c.id}"`):''}${button('Cancelar','close-modal')}<button class="btn btn-primary" data-mutate>${icon('check')}${c?'Guardar cambios (Ctrl+Enter)':'Crear tarjeta'}</button></div></form>`);
-  updateEditorKind();
-}
 function updateEditorKind(){const form=$('#card-form'),kind=$('#note-kind')?.value;if(!form||!kind)return;const labels=form.querySelectorAll('textarea');labels[1].required=kind!=='cloze';labels[0].previousElementSibling.textContent=kind==='cloze'?'Texto con espacios ocultos':'Pregunta · anverso';labels[1].previousElementSibling.textContent=kind==='cloze'?'Información adicional (opcional)':'Respuesta · reverso';$('#editor-tip').textContent=kind==='cloze'?'Escribe, por ejemplo: La capital de Perú es {{c1::Lima}}. Selecciona una palabra y pulsa «Ocultar texto» para marcarla.':kind==='reversed'?'Se crearán dos tarjetas: pregunta → respuesta y respuesta → pregunta. Puedes usar fórmulas entre \( … \).':'Puedes usar HTML básico y fórmulas entre \( … \). Tu borrador se guarda en este navegador.';}
 
 function importModal(){showModal('Tus mazos, como en casa.','Trae tu biblioteca de Anki y empieza a estudiar aquí.',`<a class="btn" href="/practice.html#import" style="margin-bottom:18px">Importar CSV, TSV, TXT o JSON</a><div class="drop-zone" id="drop-zone" role="button" tabindex="0" data-action="pick-file">${icon('upload')}<strong>Arrastra tu archivo aquí</strong><p>o haz clic para elegirlo<br>.apkg · .colpkg · .anki2 · hasta 500 MB</p></div><div class="info-box">Se importan tarjetas, plantillas y archivos multimedia incluidos. Antes de importar, guardamos una copia de tu colección. Las notas repetidas se combinan con el importador de Anki.</div><p class="small muted">Los mazos con complementos o JavaScript propio pueden necesitar ajustes. Para traer imágenes y audio, usa .apkg o .colpkg.</p><div id="import-status" class="form-error" role="status"></div>`);const zone=$('#drop-zone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragging');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragging'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragging');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0]);});zone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#import-file').click();}});}
 async function uploadFile(file){if(busy)return;if(!/\.(apkg|colpkg|anki2)$/i.test(file.name)){toast('Elige un archivo .apkg, .colpkg o .anki2.',true);return;}if(file.size>500*1024*1024){toast('El archivo supera el límite de 500 MB.',true);return;}loading(true);const status=$('#import-status');if(status){status.className='small muted';status.textContent='Importando '+file.name+'… Mantén la app abierta.';}try{const res=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Anki-Request':'1'},body:file});const result=await res.json();if(!res.ok)throw new Error(result.error||'No se pudo importar el archivo.');await refresh(false);modal.close();view='decks';search='';filter='all';render();toast(result.message||'Mazo importado. Tu biblioteca está lista.');}catch(e){if(status){status.className='form-error';status.textContent=e.message;}toast(e.message,true);}finally{loading(false);$('#import-file').value='';}}
+async function promptStudyBlock(deckId, forceNew = false) {
+  loading(true);
+  try {
+    const info = await api(`study/block-info?deckId=${encodeURIComponent(deckId || '')}`, undefined, 'GET');
+    const deck = data.decks.find(d => String(d.id) === String(deckId));
+    const deckName = deck ? deck.name : 'Todos los mazos';
+
+    if (info?.hasActiveBlock && !forceNew) {
+      showModal(
+        'Bloque de estudio activo',
+        `Tienes un bloque en curso para «${esc(deckName)}».`,
+        `
+        <div style="margin-bottom:16px">
+          <div style="background:var(--bg);padding:14px;border-radius:12px;border:1px solid var(--line);margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+              <span style="font-weight:600">Progreso del bloque</span>
+              <span><strong>${info.activeBlock.reviewedCount}</strong> de <strong>${info.activeBlock.total}</strong> tarjetas</span>
+            </div>
+            <div style="width:100%;height:8px;background:var(--line);border-radius:4px;overflow:hidden">
+              <div style="width:${info.activeBlock.progressPct}%;height:100%;background:#0284c7"></div>
+            </div>
+          </div>
+          <p class="small muted">Puedes continuar donde lo dejaste o descartar el bloque actual para configurar uno nuevo.</p>
+        </div>
+        <div class="form-footer" style="flex-direction:column;gap:8px">
+          <button class="btn btn-primary" data-action="continue-block" data-id="${deckId || ''}" style="width:100%">
+            ${icon('target')} Continuar bloque (${info.activeBlock.pending} pendientes)
+          </button>
+          <button class="btn btn-quiet" data-action="clear-block-and-new" data-id="${deckId || ''}" style="width:100%">
+            ${icon('plus')} Descartar e iniciar nuevo bloque
+          </button>
+          <button class="btn btn-quiet" data-action="close-modal" style="width:100%">
+            Cancelar
+          </button>
+        </div>
+        `
+      );
+      return;
+    }
+
+    const available = info?.availableToday || 0;
+    const totalDeck = info?.totalDeckCards || 0;
+    const unmatured = info?.unmaturedReviews || 0;
+
+    const presetBtns = [10, 20, 50].map(sz => {
+      const disabled = available === 0;
+      return `<button type="button" class="btn block-size-preset" data-size="${sz}" ${disabled ? 'disabled' : ''} style="flex:1;justify-content:center;padding:12px 8px;font-weight:600">${sz} tarjetas</button>`;
+    }).join('');
+
+    showModal(
+      'Organizar bloque de estudio',
+      `Mazo: ${esc(deckName)}`,
+      `
+      <form id="study-block-form" data-id="${deckId || ''}">
+        <div style="background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13.5px">
+            <span style="color:var(--muted)">Total de tarjetas en el mazo:</span>
+            <strong>${totalDeck} tarjetas</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13.5px">
+            <span style="color:var(--muted)">Disponibles para repasar hoy:</span>
+            <span style="font-weight:700;color:${available > 0 ? '#16a34a' : 'var(--muted)'}">${available} tarjetas</span>
+          </div>
+          ${unmatured > 0 ? `
+            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:6px;margin-top:4px">
+              <span>Repasos con intervalo para más tarde:</span>
+              <span>${unmatured}</span>
+            </div>
+          ` : ''}
+        </div>
+
+        ${available === 0 ? `
+          <div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px">
+            No tienes tarjetas vencidas ni nuevas disponibles para hoy en este mazo según tus límites diarios.
+          </div>
+        ` : `
+          <label class="field" style="margin-bottom:12px">
+            <span class="field-label"><strong>Elige el tamaño del bloque:</strong></span>
+            <div style="display:flex;gap:8px;margin-top:6px;margin-bottom:12px">
+              ${presetBtns}
+            </div>
+          </label>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <label class="field">
+              <span class="field-label">Cantidad personalizada</span>
+              <input type="number" id="block-custom-input" min="1" max="${totalDeck || 1000}" value="${Math.min(20, Math.max(1, available))}" placeholder="Ej. 15">
+            </label>
+            <div style="display:flex;align-items:flex-end">
+              <button type="button" class="btn btn-quiet" id="btn-block-all" style="width:100%;height:42px;justify-content:center">
+                Todas hoy (${available})
+              </button>
+            </div>
+          </div>
+        `}
+
+        <div class="form-error" role="alert"></div>
+        <div class="form-footer">
+          ${button('Cancelar', 'close-modal')}
+          <button class="btn btn-primary" id="btn-start-block-submit" ${available === 0 ? 'disabled' : ''}>
+            ${icon('target')} Iniciar bloque
+          </button>
+        </div>
+      </form>
+      `
+    );
+
+    setTimeout(() => {
+      const customInput = $('#block-custom-input');
+      document.querySelectorAll('.block-size-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.block-size-preset').forEach(b => b.classList.remove('active', 'btn-primary'));
+          btn.classList.add('active');
+          if (customInput) customInput.value = btn.dataset.size;
+        });
+      });
+
+      $('#btn-block-all')?.addEventListener('click', () => {
+        document.querySelectorAll('.block-size-preset').forEach(b => b.classList.remove('active', 'btn-primary'));
+        if (customInput) customInput.value = available;
+      });
+
+      $('#study-block-form')?.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const limitVal = parseInt(customInput?.value || '20', 10);
+        if (isNaN(limitVal) || limitVal < 1) {
+          toast('Por favor ingresa un número válido de tarjetas', true);
+          return;
+        }
+        loading(true);
+        try {
+          await api('study/block-start', { deckId: deckId || null, limit: limitVal });
+          modal.close();
+          await startStudy(deckId);
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          loading(false);
+        }
+      });
+    }, 40);
+
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    loading(false);
+  }
+}
+
 async function startStudy(id){AudioController.unlock();loading(true);try{isExamSession=false;examConfig=null;selectedDeck=id||null;reviewSession=await api('study',{deckId:id||null});view='study';sessionCount=0;sessionStarted=Date.now();revealed=false;search='';lastPlayedKey=null;isFullscreen=!!document.fullscreenElement;render();}finally{loading(false);}}
 async function rate(rating){
   if(busy||!revealed||!currentCard()||currentCard().renderError)return;
@@ -2124,9 +2758,12 @@ async function rate(rating){
       render();
       return;
     }
-    await api('review',{id:currentCard().id,rating,elapsedMs:Math.min(60000,Date.now()-sessionStarted)});
+    const reviewRes = await api('review',{id:currentCard().id,rating,elapsedMs:Math.min(60000,Date.now()-sessionStarted)});
     sessionCount++;
     reviewSession=await api('study',{deckId:selectedDeck});
+    if(reviewRes?.blockStatus){
+      reviewSession.blockStatus = reviewRes.blockStatus;
+    }
     revealed=false;
     sessionStarted=Date.now();
     render();
@@ -2136,6 +2773,150 @@ async function previewCard(id){const c=await api('cards/'+encodeURIComponent(id)
 async function navigate(next){view=next;selectedDeck=null;activeFolder=null;search='';if(next==='backups')backupList=await api('backups');if(next==='cards'||next==='favorites')await loadCards();if(next==='stats')await loadDetailedStats();if(next==='sync')await loadSyncInfo();render();}
 function help(){showModal('A tu ritmo, con menos clics.','Todo lo esencial para empezar.',`<div class="info-box"><strong>1.</strong> Importa un mazo o crea uno.<br><strong>2.</strong> Pulsa «Estudiar» y piensa la respuesta.<br><strong>3.</strong> Muestra la respuesta y elige cuánto recordaste.<br><strong>4.</strong> Vuelve mañana. Lumcards organiza el siguiente repaso óptimo.</div><div class="settings-row"><strong>Buscar en la biblioteca</strong><kbd>Ctrl + K</kbd></div><div class="settings-row"><strong>Mostrar la respuesta / Bien</strong><kbd>Espacio</kbd></div><div class="settings-row"><strong>Calificar un repaso</strong><kbd>1 / 2 / 3 / 4</kbd></div><div class="settings-row"><strong>Repetir audio</strong><kbd>R</kbd></div><div class="settings-row"><strong>Pantalla completa</strong><kbd>F</kbd></div><p class="small muted">La app funciona sin conexión después de instalarse. Reproduce el audio de las tarjetas automáticamente.</p>`);}
 async function confirmDelete(type,id){const d=type==='deck'?data.decks.find(d=>String(d.id)===String(id)):null;const note=type==='card'?await api('cards/'+encodeURIComponent(id)):null;showModal(type==='deck'?'¿Eliminar este mazo?':'¿Eliminar esta tarjeta?',type==='deck'?`Se eliminarán «${esc(d?.name)}» y sus tarjetas. Se guardará una copia antes de continuar.`:`Se eliminará esta nota y sus ${note?.siblingCount||1} tarjetas. Se guardará una copia antes de continuar.`,`<div class="form-footer">${button('Cancelar','close-modal')}${button('Eliminar','confirm-delete','trash','btn-danger',`data-type="${type}" data-id="${id}" data-mutate`)}</div>`);}
+
+async function deleteDeckPrompt(deckId) {
+  const d = data.decks.find(x => String(x.id) === String(deckId));
+  if (!d) return;
+
+  const isFolder = Boolean(d.isFolder);
+  const childDecks = data.decks.filter(x => x.parentName === d.name || x.name.startsWith(d.name + '::'));
+  const totalCards = (d.total || 0) + childDecks.reduce((sum, c) => sum + (c.total || 0), 0);
+  const displayName = isFolder ? d.name : (d.shortName || d.name);
+
+  if (isFolder) {
+    showModal(
+      `¿Eliminar carpeta «${esc(displayName)}»?`,
+      `Esta carpeta contiene ${childDecks.length} ${childDecks.length === 1 ? 'libro o submazo' : 'libros o submazos'}. Elige qué deseas hacer con su contenido.`,
+      `
+      <div class="delete-deck-prompt-modal">
+        <div class="delete-modal-summary">
+          <div class="delete-modal-row">
+            <span class="muted">Carpeta:</span>
+            <strong>📁 ${esc(d.name)}</strong>
+          </div>
+          <div class="delete-modal-row">
+            <span class="muted">Libros / submazos:</span>
+            <span><strong>${childDecks.length}</strong> incluidos</span>
+          </div>
+          <div class="delete-modal-row">
+            <span class="muted">Tarjetas totales:</span>
+            <span><strong>${num(totalCards)}</strong> tarjetas</span>
+          </div>
+          <div class="delete-modal-row" style="margin-top:4px;font-size:12px;color:var(--muted)">
+            <span>🛡️ Se creará una copia de seguridad automática antes de aplicar cualquier cambio.</span>
+          </div>
+        </div>
+
+        <div class="delete-choice-group">
+          <label class="delete-choice-card">
+            <input type="radio" name="folder-delete-scope" value="keep" checked>
+            <div>
+              <strong>Conservar libros y submazos (Recomendado)</strong>
+              <div class="small muted" style="margin-top:2px">
+                Elimina solo la carpeta «${esc(d.name)}». Los ${childDecks.length} libros se moverán a la raíz de tu biblioteca sin perder sus tarjetas ni su progreso de estudio.
+              </div>
+            </div>
+          </label>
+
+          <label class="delete-choice-card delete-choice-danger">
+            <input type="radio" name="folder-delete-scope" value="destroy">
+            <div>
+              <strong style="color:#ef4444">Eliminar carpeta, todos los libros y sus tarjetas</strong>
+              <div class="small muted" style="margin-top:2px">
+                Elimina permanentemente la carpeta «${esc(d.name)}», sus ${childDecks.length} libros y todas sus ${num(totalCards)} tarjetas.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <div class="form-error" id="delete-deck-error" role="alert" style="margin-bottom:12px;display:none"></div>
+
+        <div class="form-footer" style="display:flex;justify-content:flex-end;gap:10px">
+          ${button('Cancelar', 'close-modal')}
+          <button type="button" class="btn btn-danger" id="btn-submit-delete-deck" data-id="${d.id}" data-is-folder="1">
+            ${icon('trash')} Eliminar carpeta
+          </button>
+        </div>
+      </div>
+      `
+    );
+  } else {
+    showModal(
+      `¿Eliminar mazo «${esc(displayName)}»?`,
+      `Se eliminará el mazo y sus tarjetas de forma definitiva.`,
+      `
+      <div class="delete-deck-prompt-modal">
+        <div class="delete-modal-summary">
+          <div class="delete-modal-row">
+            <span class="muted">Mazo:</span>
+            <strong>📖 ${esc(d.name)}</strong>
+          </div>
+          <div class="delete-modal-row">
+            <span class="muted">Tarjetas que se eliminarán:</span>
+            <span><strong style="color:#ef4444">${num(d.total)}</strong> tarjetas</span>
+          </div>
+          <div class="delete-modal-row" style="margin-top:4px;font-size:12px;color:var(--muted)">
+            <span>🛡️ Se creará una copia de seguridad automática antes de eliminar.</span>
+          </div>
+        </div>
+
+        <div class="form-error" id="delete-deck-error" role="alert" style="margin-bottom:12px;display:none"></div>
+
+        <div class="form-footer" style="display:flex;justify-content:flex-end;gap:10px">
+          ${button('Cancelar', 'close-modal')}
+          <button type="button" class="btn btn-danger" id="btn-submit-delete-deck" data-id="${d.id}" data-is-folder="0">
+            ${icon('trash')} Eliminar mazo y tarjetas
+          </button>
+        </div>
+      </div>
+      `
+    );
+  }
+
+  const submitBtn = $('#btn-submit-delete-deck');
+  const errorBox = $('#delete-deck-error');
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      if (busy) return;
+      const isFolderScope = isFolder;
+      let keepChildren = false;
+      if (isFolderScope) {
+        const selectedScope = document.querySelector('input[name="folder-delete-scope"]:checked')?.value;
+        keepChildren = selectedScope === 'keep';
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Eliminando…';
+      if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
+      loading(true);
+
+      try {
+        await api('delete', { id: d.id, type: 'deck', keepChildren });
+        modal.close();
+        if (activeFolder === d.name) activeFolder = null;
+        if (selectedDeck && (String(selectedDeck) === String(d.id) || childDecks.some(c => String(c.id) === String(selectedDeck)))) {
+          selectedDeck = null;
+          view = 'decks';
+        }
+        await refresh();
+        const msg = isFolderScope
+          ? (keepChildren ? `Carpeta «${displayName}» eliminada. Se conservaron los submazos en la biblioteca.` : `Carpeta «${displayName}» y todo su contenido eliminados.`)
+          : `Mazo «${displayName}» eliminado.`;
+        toast(`${msg} Se guardó copia de seguridad previa.`);
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `${icon('trash')} ${isFolder ? 'Eliminar carpeta' : 'Eliminar mazo y tarjetas'}`;
+        if (errorBox) {
+          errorBox.textContent = err?.message || 'Error al eliminar. La biblioteca no fue modificada.';
+          errorBox.style.display = 'block';
+        }
+        toast(err?.message || 'Error al eliminar', 'error');
+      } finally {
+        loading(false);
+      }
+    });
+  }
+}
 
 // --- 1. PLAN DE ESTUDIO FLEXIBLE (DECK CONFIG) ---
 async function deckConfigModal(deckId){
@@ -2678,7 +3459,29 @@ document.addEventListener('click', async e => {
       selectedDeck = null;
       render();
     }
-    else if (a === 'study') await startStudy(id);
+    else if (a === 'study') await promptStudyBlock(id);
+    else if (a === 'continue-block') {
+      modal.close();
+      await startStudy(id || selectedDeck);
+    }
+    else if (a === 'clear-block-and-new') {
+      loading(true);
+      try {
+        await api('study/block-clear', { deckId: id || selectedDeck || null });
+        modal.close();
+        await promptStudyBlock(id || selectedDeck, true);
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        loading(false);
+      }
+    }
+    else if (a === 'new-block-prompt') {
+      await promptStudyBlock(id || selectedDeck, true);
+    }
+    else if (a === 'attend-again-reviews') {
+      await startStudy(id || selectedDeck);
+    }
     else if (a === 'reveal') { revealed = true; render(); }
     else if (a === 'rate') await rate(Number(el.dataset.rating));
     else if (a === 'replay-audio') {
@@ -2722,7 +3525,8 @@ document.addEventListener('click', async e => {
     else if (a === 'export-deck') {
       location.href = '/api/export?deckId=' + encodeURIComponent(id);
     }
-    else if (a === 'delete-card' || a === 'delete-deck') await confirmDelete(a === 'delete-card' ? 'card' : 'deck', id);
+    else if (a === 'delete-deck' || a === 'delete-deck-prompt') await deleteDeckPrompt(id);
+    else if (a === 'delete-card') await confirmDelete('card', id);
     else if (a === 'confirm-delete') {
       if (busy) return;
       loading(true);
@@ -2899,8 +3703,9 @@ else if(form.id==='drive-auth-form'){
 else{const dailyGoal=Number(form.id==='settings-form'?$('#daily-goal').value:values.dailyGoal);await api('settings',{dailyGoal});modal.close();await refresh();toast('Tu meta se ha guardado.');}}catch(error){const err=form.querySelector('.form-error');if(err)err.textContent=error.message;toast(error.message,true);}finally{loading(false);}});
 async function handleStudyKey(code,key){if(busy||modal.open||view!=='study'||!currentCard())return;AudioController.unlock();const isSpace=code==='Space'||key===' '||key==='Space'||code==='Enter'||key==='Enter';if(isSpace&&!revealed){revealed=true;render();}else if(isSpace&&revealed){await rate(3);}else if(revealed&&/^[1-4]$/.test(key)){await rate(Number(key));}else if(key==='f'||key==='F'){await toggleFullscreen();}else if(key==='Escape'){if(document.fullscreenElement&&document.exitFullscreen){try{await document.exitFullscreen();}catch{}}isFullscreen=false;AudioController.stop();await refresh(false);view='decks';selectedDeck=null;render();}else if(key==='e'||key==='E'){await cardForm(currentCard().id);}else if(key==='r'||key==='R'){const c=currentCard();if(c){const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios.length)AudioController.playList(audios);}}else if(key==='s'||key==='S'){const c=currentCard();if(c){loading(true);const was=c.starred;await api('star',{id:c.id});c.starred=!was;render();toast(was?'Tarjeta quitada de favoritos.':'Tarjeta guardada en favoritos.');loading(false);}}}
 document.addEventListener('keydown',e=>{AudioController.unlock();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#global-search')?.focus();return;}if(modal.open){if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){const subBtn=modal.querySelector('button.btn-primary, button[data-mutate]');if(subBtn){e.preventDefault();subBtn.click();return;}}return;}if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||busy)return;if(view==='study'&&currentCard()){const isSpace=e.code==='Space'||e.key===' '||e.key==='Space'||e.code==='Enter'||e.key==='Enter';if(isSpace||/^[1-4]$/.test(e.key)||['f','F','Escape','s','S','e','E','r','R'].includes(e.key)){e.preventDefault();handleStudyKey(e.code,e.key).catch(err=>toast(err.message,true));}}});
-window.addEventListener('message',e=>{AudioController.unlock();if(e.data){if(e.data.ankiPlayAudio){AudioController.playSingle(e.data.ankiPlayAudio);}else if(e.data.ankiCardClick){if(view==='study'&&!revealed&&currentCard()){revealed=true;render();}}else if(e.data.ankiKey||e.data.ankiCode){handleStudyKey(e.data.ankiCode,e.data.ankiKey).catch(err=>toast(err.message,true));}}});
+window.addEventListener('message',e=>{const frame=document.querySelector('#study-frame');if(!frame||e.source!==frame.contentWindow)return;const trustedOrigin=e.origin===location.origin||(e.origin==='null'&&frame.hasAttribute('srcdoc'));if(!trustedOrigin)return;AudioController.unlock();if(e.data){if(e.data.ankiStopAudio){AudioController.stop();}else if(e.data.ankiPlayAudio){AudioController.playSingle(e.data.ankiPlayAudio);const aud=AudioController.currentAudio;if(aud){const origEnd=aud.onended,origErr=aud.onerror;const notify=()=>{try{frame.contentWindow.postMessage({ankiAudioEnded:true},location.origin);}catch{}};aud.onended=()=>{if(origEnd)origEnd();notify();};aud.onerror=()=>{if(origErr)origErr();notify();};};}else if(e.data.ankiCardClick){if(view==='study'&&!revealed&&currentCard()){revealed=true;render();}}else if(e.data.ankiKey||e.data.ankiCode){handleStudyKey(e.data.ankiCode,e.data.ankiKey).catch(err=>toast(err.message,true));}}});
 modal.addEventListener('click',e=>{if(e.target===modal){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close();}});
+modal.addEventListener('close',()=>{modal.className='';});
 async function boot(){
   try{
     if (window.LumcardsSync) {
@@ -2954,7 +3759,18 @@ async function templateEditorModal() {
   let tempConfig = { ...current };
   let isPreviewFlipped = false;
 
-  const themesHtml = Object.entries(CARD_THEMES).map(([key, t]) => `
+  const sampleCard = {
+    id: 'sample_preview',
+    front: `¿Cuál es el proceso celular mediante el cual las plantas convierten energía lumínica en energía química?
+<p style="margin-top:10px">Fórmula simplificada: \\[ 6\\text{CO}_2 + 6\\text{H}_2\\text{O} \\xrightarrow{\\text{luz}} \\text{C}_6\\text{H}_{12}\\text{O}_6 + 6\\text{O}_2 \\]</p>
+<p style="margin-top:8px"><span class="cloze">[Fotosíntesis oxigénica]</span></p>`,
+    back: `<strong class="cloze" style="font-size:1.15em">Fotosíntesis oxigénica</strong>
+<p style="margin-top:8px">Ocurre dentro de los cloroplastos mediante reacciones fotoquímicas en los tilacoides y el ciclo de Calvin en el estroma, produciendo glucosa y oxígeno.</p>
+<p class="small muted" style="margin-top:8px">Contenido largo y fórmulas matemáticas permanecen legibles con desplazamiento interno.</p>`,
+    css: ''
+  };
+
+  const themesHtml = Object.entries(CARD_THEMES).filter(([k]) => k !== 'quizlet').map(([key, t]) => `
     <button type="button" class="styler-theme-btn ${tempConfig.theme === key ? 'active' : ''}" data-styler-theme="${key}">
       <div class="styler-swatch" style="background:${t.swatch};border:1.5px solid ${t.swatchBorder};color:${t.text}">Aa</div>
       <div class="styler-theme-name">${esc(t.name)}</div>
@@ -2998,7 +3814,7 @@ async function templateEditorModal() {
             <label class="field">
               <span class="field-label"><strong>Alineación del texto</strong></span>
               <select id="styler-align-select">
-                <option value="center" ${tempConfig.align==='center'?'selected':''}>Centrado (Estilo Quizlet)</option>
+                <option value="center" ${tempConfig.align==='center'?'selected':''}>Centrado</option>
                 <option value="left" ${tempConfig.align==='left'?'selected':''}>Izquierda (Estilo editorial)</option>
               </select>
             </label>
@@ -3013,36 +3829,28 @@ async function templateEditorModal() {
               </select>
             </label>
           </div>
+
+          <label class="field">
+            <span class="field-label"><strong>Precedencia en tarjetas importadas</strong></span>
+            <select id="styler-template-mode-select">
+              <option value="lumcards" ${tempConfig.templateMode==='lumcards'?'selected':''}>Diseño Lumcards (Aplica el tema y colores elegidos)</option>
+              <option value="original" ${tempConfig.templateMode==='original'?'selected':''}>Diseño original (Conserva estilos y colores de Anki)</option>
+            </select>
+          </label>
         </div>
 
         <div class="styler-preview-box">
-          <label class="field-label" style="font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
-            <span>Vista previa interactiva</span>
-            <span class="small muted">Haz clic en la tarjeta para voltearla</span>
-          </label>
-
-          <div class="styler-preview-card" id="styler-preview-card">
-            <div class="styler-card-inner" id="styler-card-inner">
-              <div class="styler-card-face front" id="styler-card-front">
-                <span class="badge" style="position:absolute;top:16px;left:20px;font-size:11px">ANVERSO</span>
-                <div id="styler-preview-q" style="width:100%">
-                  ¿Cuál es el proceso celular mediante el cual las plantas convierten luz en energía?
-                  <div style="margin-top:10px"><span class="cloze">[Fotosíntesis]</span></div>
-                </div>
-              </div>
-              <div class="styler-card-face back" id="styler-card-back">
-                <span class="badge" style="position:absolute;top:16px;left:20px;font-size:11px">REVERSO</span>
-                <div id="styler-preview-a" style="width:100%">
-                  <strong class="cloze" style="font-size:1.1em">Fotosíntesis</strong>
-                  <p style="margin-top:8px;opacity:0.85;font-size:0.9em">Transformación del agua y dióxido de carbono en glucosa y oxígeno impulsada por fotones en los cloroplastos.</p>
-                </div>
-              </div>
-            </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:10px">
+            <label class="field-label" style="font-weight:700;font-size:13px;margin:0">Vista previa en tiempo real</label>
+            <button type="button" class="styler-flip-pill" id="styler-btn-flip" title="Alternar entre anverso y reverso">
+              ${icon('spark')} <span id="styler-flip-label">Ver reverso</span>
+            </button>
           </div>
 
-          <button type="button" class="styler-flip-pill" id="styler-btn-flip">
-            ${icon('spark')} Girar tarjeta (Ver reverso / anverso)
-          </button>
+          <div style="width:100%;position:relative;min-height:300px">
+            <iframe class="card-frame styler-preview-frame" id="styler-frame" title="Vista previa interactiva del diseño" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>
+          </div>
+          <p class="small muted" style="margin:4px 0 0;text-align:center">Mismo motor de renderizado que en el repaso real. No produce audio ni altera el progreso.</p>
         </div>
       </div>
 
@@ -3057,44 +3865,11 @@ async function templateEditorModal() {
 
   setTimeout(() => {
     const updatePreviewUI = () => {
-      const themeObj = CARD_THEMES[tempConfig.theme] || CARD_THEMES.quizlet;
-      const fontFamilies = {
-        sans: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        serif: "Georgia, 'Charter', 'Times New Roman', serif",
-        mono: "Consolas, 'Courier New', monospace",
-        rounded: "'Outfit', 'Quicksand', 'Segoe UI', sans-serif"
-      };
-      const frontFace = $('#styler-card-front');
-      const backFace = $('#styler-card-back');
-      const inner = $('#styler-card-inner');
-
-      if (!frontFace || !backFace || !inner) return;
-
-      const styles = {
-        background: themeObj.bg,
-        color: themeObj.text,
-        fontFamily: fontFamilies[tempConfig.font] || fontFamilies.sans,
-        fontSize: tempConfig.size || '22px',
-        textAlign: tempConfig.align || 'center',
-        borderColor: themeObj.hr
-      };
-
-      [frontFace, backFace].forEach(face => {
-        face.style.background = styles.background;
-        face.style.color = styles.color;
-        face.style.fontFamily = styles.fontFamily;
-        face.style.fontSize = styles.fontSize;
-        face.style.textAlign = styles.textAlign;
-        face.style.borderColor = styles.borderColor;
-        face.querySelectorAll('.cloze').forEach(el => {
-          el.style.color = tempConfig.cloze || themeObj.cloze;
-          el.style.borderBottom = '2px solid ' + (tempConfig.cloze || themeObj.cloze);
-        });
-      });
-
-      if (inner) {
-        inner.classList.toggle('flipped', isPreviewFlipped);
-      }
+      const frame = $('#styler-frame');
+      if (!frame) return;
+      const flipLabel = $('#styler-flip-label');
+      if (flipLabel) flipLabel.textContent = isPreviewFlipped ? 'Ver anverso' : 'Ver reverso';
+      mountCard(frame, sampleCard, isPreviewFlipped, tempConfig, false);
     };
 
     // Theme selector
@@ -3132,18 +3907,25 @@ async function templateEditorModal() {
       updatePreviewUI();
     });
 
+    $('#styler-template-mode-select')?.addEventListener('change', e => {
+      tempConfig.templateMode = e.target.value;
+      updatePreviewUI();
+    });
+
     const toggleFlip = () => {
       isPreviewFlipped = !isPreviewFlipped;
-      $('#styler-card-inner')?.classList.toggle('flipped', isPreviewFlipped);
+      updatePreviewUI();
     };
 
-    $('#styler-preview-card')?.addEventListener('click', toggleFlip);
     $('#styler-btn-flip')?.addEventListener('click', toggleFlip);
 
     $('#styler-btn-save')?.addEventListener('click', () => {
       localStorage.setItem('lumcards-card-style', JSON.stringify(tempConfig));
       modal.close();
-      toast('¡Diseño de tarjetas guardado! Aplicado a todos tus repasos y tarjetas.');
+      toast('¡Diseño de tarjetas guardado! Aplicado a tus repasos.');
+      if (view === 'study' && currentCard()) {
+        mountCard($('#study-frame'), currentCard(), revealed);
+      }
     });
 
     updatePreviewUI();

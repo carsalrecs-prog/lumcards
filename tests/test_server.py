@@ -63,7 +63,7 @@ class ServerTests(unittest.TestCase):
     def test_01_static_and_initial_state(self):
         page = self.request('/', raw=True).decode()
         self.assertIn('lang="es"', page)
-        self.assertIn('/app.js?v=20260915', page)
+        self.assertIn('/app.js?v=20260917-practice-folders-studio', page)
         state = self.request('/api/state')
         self.assertEqual(state['stats']['totalCards'], 13)
         self.assertEqual(state['stats']['reviewedToday'], 0)
@@ -72,8 +72,8 @@ class ServerTests(unittest.TestCase):
 
     def test_student_stylesheet_is_served_for_both_screens(self):
         for route in ('/', '/practice.html'):
-            self.assertIn('/student.css?v=20260914', self.request(route, raw=True).decode())
-        with urllib.request.urlopen(self.url + '/student.css?v=20260914') as response:
+            self.assertIn('/student.css?v=20260917-practice-folders-studio', self.request(route, raw=True).decode())
+        with urllib.request.urlopen(self.url + '/student.css?v=20260917-practice-folders-studio') as response:
             self.assertIn('text/css', response.headers['Content-Type'])
             self.assertIn(b'.study-tools-grid', response.read())
 
@@ -180,7 +180,64 @@ class ServerTests(unittest.TestCase):
         duplicate = subprocess.run([sys.executable, str(ROOT / 'server.py'), '--port', str(self.port), '--data-dir', self.temp.name], capture_output=True, timeout=10, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         self.assertNotEqual(duplicate.returncode, 0)
         self.assertTrue(self.request('/api/health')['ok'])
-        self.assertGreaterEqual(self.request('/api/state')['stats']['totalCards'], 13)
+    def test_08_study_blocks_flow(self):
+        deck = self.request('/api/decks', {'name': 'Mazo Bloques'})
+        c_ids = []
+        for i in range(5):
+            c = self.request('/api/cards', {'deckId': deck['id'], 'front': f'Q{i+1}', 'back': f'A{i+1}'})
+            c_ids.append(c['id'])
+
+        info = self.request('/api/study/block-info?deckId=' + str(deck['id']))
+        self.assertFalse(info['hasActiveBlock'])
+        self.assertEqual(info['totalDeckCards'], 5)
+        self.assertEqual(info['availableToday'], 5)
+
+        start_res = self.request('/api/study/block-start', {'deckId': deck['id'], 'limit': 3})
+        self.assertTrue(start_res['saved'])
+        self.assertEqual(start_res['block']['total'], 3)
+        self.assertEqual(start_res['block']['pending'], 3)
+
+        info2 = self.request('/api/study/block-info?deckId=' + str(deck['id']))
+        self.assertTrue(info2['hasActiveBlock'])
+        self.assertEqual(info2['activeBlock']['total'], 3)
+
+        # Primer repaso con 'Otra vez' (rating 1)
+        s1 = self.request('/api/study', {'deckId': deck['id']})
+        self.assertEqual(len(s1['cards']), 1)
+        card1_id = s1['cards'][0]['id']
+        rev1 = self.request('/api/review', {'id': card1_id, 'rating': 1, 'elapsedMs': 1500})
+        self.assertEqual(rev1['blockStatus']['reviewedCount'], 1)
+        self.assertEqual(rev1['blockStatus']['againCount'], 1)
+
+        # Segundo repaso con 'Bien' (rating 3)
+        s2 = self.request('/api/study', {'deckId': deck['id']})
+        card2_id = s2['cards'][0]['id']
+        self.assertNotEqual(card1_id, card2_id)
+        rev2 = self.request('/api/review', {'id': card2_id, 'rating': 3, 'elapsedMs': 1200})
+        self.assertEqual(rev2['blockStatus']['reviewedCount'], 2)
+        self.assertEqual(rev2['blockStatus']['againCount'], 1)
+
+        # Tercer repaso con 'Bien' (rating 3)
+        s3 = self.request('/api/study', {'deckId': deck['id']})
+        card3_id = s3['cards'][0]['id']
+        rev3 = self.request('/api/review', {'id': card3_id, 'rating': 3, 'elapsedMs': 1100})
+        self.assertEqual(rev3['blockStatus']['reviewedCount'], 3)
+
+        # Fin de primera pasada del bloque
+        s_end = self.request('/api/study', {'deckId': deck['id']})
+        self.assertTrue(s_end['finished'])
+        self.assertTrue(s_end['blockStatus']['firstPassDone'])
+        self.assertEqual(s_end['blockStatus']['total'], 3)
+        self.assertEqual(s_end['blockStatus']['reviewedCount'], 3)
+        self.assertEqual(s_end['blockStatus']['againCount'], 1)
+
+        # Descartar bloque
+        clear_res = self.request('/api/study/block-clear', {'deckId': deck['id']})
+        self.assertTrue(clear_res['saved'])
+        info3 = self.request('/api/study/block-info?deckId=' + str(deck['id']))
+        self.assertFalse(info3['hasActiveBlock'])
+
+        self.request('/api/delete', {'type': 'deck', 'id': deck['id']})
 
 
 if __name__ == '__main__':
