@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lumcards-cache-library-20260917-web-stats';
+const CACHE_NAME = 'lumcards-cache-library-20260917-web-stats-studio-final';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -12,7 +12,7 @@ const ASSETS_TO_CACHE = [
   '/icon-192.png',
   '/icon-512.png',
   '/practice.html',
-  '/practice.css?v=20260917-web-stats',
+  '/practice.css?v=20260917-web-stats-studio-final',
   '/practice.js?v=20260917-web-stats',
   '/study-games.js?v=20260917-web-stats'
 ];

@@ -41,7 +41,14 @@ for ($ankiAttempt = 0; $ankiAttempt -lt 90; $ankiAttempt++) {
         if ($ankiHealth.app -eq 'lumcards' -or $ankiHealth.app -eq 'anki2') {
             exit 0
         }
-    } catch { }
-    if ($ankiProcess.HasExited) { throw 'No se pudo iniciar la app. Revisa data\server-error.log.' }
+    if ($ankiProcess.HasExited) {
+        try {
+            $ankiHealth = Invoke-RestMethod -Uri "$ankiUrl/api/health" -TimeoutSec 2
+            if ($ankiHealth.app -eq 'lumcards' -or $ankiHealth.app -eq 'anki2') {
+                exit 0
+            }
+        } catch { }
+        throw 'No se pudo iniciar la app. Revisa data\server-error.log.'
+    }
 }
 throw 'La app sigue preparando tu biblioteca. Revisa data\server.log e intenta abrirla de nuevo.'

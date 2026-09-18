@@ -1,6 +1,6 @@
 ---
 tags: [lumcards, backlog]
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # Próximas tareas
@@ -19,6 +19,12 @@ updated: 2026-09-17
 - [ ] Revisar disponibilidad y registro de la marca Lumcards.
 
 ## P1 — estabilización técnica
+
+- [x] Cierre visual independiente e instalación de activos de Juegos: [[tasks/2026-09-17-2300-codex-cierre-diseno]].
+- [x] Etapa 1 Biblioteca y navegación consistente con Studio: [[tasks/2026-09-17-2315-antigravity-redinseo-biblioteca-navegacion]]. Implementada y verificada en Chromium en 5 viewports.
+- [x] Etapa 2 Estudio y visor de tarjetas consistente con Studio: [[tasks/2026-09-17-2337-antigravity-estudio-visor-tarjetas-studio]]. Implementada y verificada en Chromium en 5 viewports con paridad 0-diff y suites de audio/regresión pasando.
+- [x] Etapa 3 Estadísticas web, modales y explorador de tarjetas consistente con Studio: [[tasks/2026-09-18-0020-antigravity-explorador-modales-estadisticas-studio]]. Implementada y verificada en Chromium en 5 viewports con paridad 0-diff y suites pasando al 100%.
+- [ ] Etapa 4 Mi espacio y ajustes (opcional según el [[tasks/2026-09-17-2305-codex-plan-diseno-resto|plan maestro de diseño]]).
 
 - [x] Rediseño de Jugar y aprender implementado y validado: [[tasks/2026-09-17-0720-codex-redisenar-juegos]]. Nuevo estudio de práctica con 6 modos, arte decorativo adaptable, reductor de movimiento y tests E2E superados en todos los viewports.
 - [x] Selector jerárquico de carpetas en Juegos y presentación adaptable: [[tasks/2026-09-17-0630-codex-juegos-carpetas]]. Etapa 1 implementada y verificada en suite Playwright en 4 viewports, backend y fallback offline por Antigravity; listo para revisión de Codex. Propuestas de nuevos juegos de Etapa 2 pendientes de decisión.

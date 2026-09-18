@@ -6,7 +6,7 @@ tags: [lumcards, tarea]
 
 ## Control
 - ID: 2026-09-17-0738-codex-practice-studio-tests
-- Estado: en_curso
+- Estado: hecha
 - Responsable y sesión: Codex, subagente studio_final_validation retoma pruebas de practice_design_tests por delegación del coordinador; coordinador integra notas globales.
 - Actualizado: 2026-09-17T13:38:00-05:00
 - Entorno: D:\CODEX, main/base 9943bf9 según relevo; git status revisado. Cambios ajenos preservados.
@@ -36,4 +36,4 @@ tags: [lumcards, tarea]
 - Exec sandbox falla; ejecución revisada restaurada. Cada servidor de prueba terminó con su finally; sin procesos propios activos. IDs de nuevas notas bloquean reintento útil hasta corrección del coordinador.
 
 ## Cierre
-- En curso; coordinador actualizará [[08_HANDOFF]] y [[tasks/2026-09-17-0720-codex-redisenar-juegos]].
+- 23:09: Codex retomó y repitió prueba completa PASS tras entrega posterior de Antigravity y dos últimos retoques de CSS. Quedan resueltos reduced-motion/colisiones/recortes;30 capturas nuevas. El fixture inicializa una colección sintética vacía real, excluye expresamente seed de demos; no certifica arreglo del motor. Cierre vigente en [[tasks/2026-09-17-2300-codex-cierre-diseno]]; los apartados anteriores documentan los fallos históricos.

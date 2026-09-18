@@ -1,9 +1,72 @@
 ---
 tags: [lumcards, registro]
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # Registro de trabajo
+
+## 2026-09-18 — Diagnóstico y robustez del arranque de escritorio y servidor local
+
+- Antigravity diagnosticó el error reportado en `Lumcards.exe` (*"No se pudo iniciar la biblioteca. Revisa data\server-error.log"*):
+  1. Causa raíz: En `data\server-error.log` figuraba `OSError: [WinError 10048] Solo se permite un uso de cada dirección de socket` debido a una segunda invocación de `server.py` compitiendo por el puerto 8765 mientras la primera instancia (PID 23168) ya estaba activa. Al salir el proceso duplicado, `start.ps1` consideró prematuramente que el arranque había fallado y arrojó excepción a `Lumcards.exe`.
+  2. Mitigaciones:
+     - `server.py`: `valid_host()` valida de inmediato `127.0.0.1`, `localhost` y `0.0.0.0` sin abrir sockets UDP a `8.8.8.8:80` en cada petición local.
+     - `start.ps1`: ante la salida de `$ankiProcess`, ejecuta una verificación de salud redundante (`/api/health`); si el servidor ya está respondiendo, sale con código 0.
+     - `tools/launcher.cs`: antes de lanzar excepción si el proceso auxiliar reporta salida, consulta `IsHealthyAsync()`; timeout de sonda elevado a 2500ms.
+     - `tools/build-desktop.ps1 -StageOnly` ejecutado con éxito.
+  3. Estado: Servidor PID 23168 activo y sano; 3.972 tarjetas intactas. Basta hacer clic en "Volver a intentar" en la ventana de Lumcards.
+- Archivos: `server.py`, `start.ps1`, `tools/launcher.cs`, `tools/build-desktop.ps1`.
+- Validación: `curl.exe http://127.0.0.1:8765/api/health` 200 OK, `curl.exe http://127.0.0.1:8765/api/state` 200 OK, 92 pruebas unitarias de backend PASS (17.8s). Ficha: [[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]].
+
+## 2026-09-18 — Rediseño Etapa 3: Modales, explorador de tarjetas y estadísticas consistente con Studio
+
+- Antigravity implementó la Etapa 3 del plan de coherencia visual ([[tasks/2026-09-17-2305-codex-plan-diseno-resto]]):
+  1. Modales del sistema (`dialog`, `#modal`, `#study-block-form`, `#dialog-deck-modal`, editor) con radio de 20px, sombra difusa profunda `0 24px 60px rgba(19, 23, 34, 0.22)`, desenfoque `backdrop-filter: blur(4px)`, botones principales con gradiente índigo Studio (`linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)`), selector segmented pill de tarjetas para bloque (`.block-size-preset`) y campos con radio de 11px y foco índigo accesible.
+  2. Explorador y lista de tarjetas (`cardsView` / `favorites`): filas `.note-row` con radio de 18px (`var(--card-radius)`), elevación sutil al hover, `min-width: 0; max-width: 100%` con truncamiento de títulos largos evitando desbordamientos en móvil, y badges semánticos suaves ('Repasada en este bloque', 'Repasada antes', 'Nueva', 'Pendiente') en claro y noche translúcida en oscuro.
+  3. Pantalla Mi progreso (`statistics()` / `.stats-container`): tarjetas `.stats-card` y paneles con radio de 18px, encabezados editoriales Georgia/serif, cajas de métricas `.stats-metric-box` con radio de 14px, selector de periodo en píldoras ergonómicas, y preservación al 100% de la lógica matemática, endpoints web (`cardBreakdown`, `retentionTable`, `forecast`, `weakCards`) y fallback offline sin servidor.
+  4. Preservación estricta de `clean_engine.py`, base de datos SQLite y paridad 0-diff en `dist/` vs `docs/`.
+- Archivos: `dist/student.css`, espejo `docs/student.css`, nueva suite E2E `tests/test_studio_etapa3_design.cjs`.
+- Validación: `node tests/test_studio_etapa3_design.cjs` PASS en 5 viewports (15 capturas en `tests/screenshots_studio_etapa3/`, 0 scroll horizontal), `node tests/test_study_studio_design.cjs` PASS, `node tests/test_library_navigation_design.cjs` PASS, `node tests/test_ux_study_audio.cjs` PASS, `node tests/test_practice_studio.cjs` PASS, `node tests/test_frontend.cjs` PASS, `node tests/test_web_stats.cjs` PASS, 92 tests unitarios Python PASS, 0 diff entre `dist/` y `docs/`. Ficha: [[tasks/2026-09-18-0020-antigravity-explorador-modales-estadisticas-studio]].
+
+## 2026-09-18 — Rediseño Etapa 2: Estudio y visor de tarjetas consistente con Studio
+
+- Antigravity implementó la Etapa 2 del plan de coherencia visual ([[tasks/2026-09-17-2305-codex-plan-diseno-resto]]):
+  1. Pantalla de estudio (`studyView`) unificada con la estética Studio (marfil `#f7f6f2` / noche azulada `#131722`).
+  2. Barra superior `.anki-topbar` compacta y ergonómica (50-52px), botón de retorno `← Mazos`, indicador de progreso tipo píldora con micro-barra y conteos destacados, accesos rápidos (audio R, editar E, favorita S, pantalla completa F).
+  3. Marco y visor de tarjetas `.anki-card-frame` con esquinas redondeadas de 18px (14px en móvil), sombra suave y scroll interno seguro sin desbordamiento del viewport.
+  4. Botón "Mostrar respuesta" `.anki-btn-show` Studio con degradado índigo suave y distintivo `<kbd>Espacio</kbd>`.
+  5. Botones de calificación 1–4 `.anki-rate-button` con paleta semántica armoniosa (rojo suave, ámbar cálido, verde esmeralda suave, índigo pastel) en claro y translúcidos noche en oscuro, con atajos `<kbd>1..4</kbd>` e intervalos de tiempo asociados; en móvil distribuidos en grid 2x2 táctil accesible.
+  6. Preservación estricta de la delegación de audio (`AudioController`), atajos de teclado, temporizadores y algoritmos SRS de `clean_engine.py`.
+- Archivos: `dist/student.css`, espejo `docs/student.css`, suite E2E `tests/test_study_studio_design.cjs`.
+- Validación: `node tests/test_study_studio_design.cjs` PASS en 5 viewports (15 capturas en `tests/screenshots_study_studio/`, 0 scroll horizontal), `node tests/test_ux_study_audio.cjs` PASS, `node tests/test_library_navigation_design.cjs` PASS, `node tests/test_practice_studio.cjs` PASS, `node tests/test_frontend.cjs` PASS, `node tests/test_web_stats.cjs` PASS, 92 tests unitarios Python PASS, 0 diff entre `dist/` y `docs/`. Ficha: [[tasks/2026-09-17-2337-antigravity-estudio-visor-tarjetas-studio]].
+
+## 2026-09-17 — Rediseño Etapa 1: Biblioteca y navegación consistente con Studio
+
+- Antigravity implementó la Etapa 1 del plan de coherencia visual ([[tasks/2026-09-17-2305-codex-plan-diseno-resto]]):
+  1. Identidad unificada con Studio: paleta marfil `#f7f6f2` (claro) / `#131722` (oscuro), acento índigo `#6554df` / `#6366f1`, líneas suaves `#e5e8ee` / `#30394b`, superficies `#ffffff` / `#1c2230`.
+  2. Tipografía editorial Georgia/serif para títulos principales (`h1`, `h2`) y sans-serif limpia para controles y metadatos.
+  3. Sidebar y topbar con brand mark degradado, navegación ergonómica (radio 10-12px), buscador con `Ctrl K` accesible.
+  4. Paneles de bienvenida Studio: `focus-panel` con degradado índigo suave, órbita circular perfecta con tarjetas de hoy y botón CTA de alto contraste; `goal-panel` con radio de 18px, insignia de racha y barra de progreso.
+  5. Tarjetas de mazo y carpetas con radio de 18px (`var(--card-radius)`), elevación sutil, badges distintivos de carpetas y navegación interna.
+- Archivos: `dist/app.css`, `dist/student.css`, espejos `docs/app.css`, `docs/student.css`, nueva suite `tests/test_library_navigation_design.cjs`.
+- Validación: `tests/test_library_navigation_design.cjs` PASS en 5 viewports (12 capturas, sin scroll horizontal), `test_frontend.cjs` PASS, `test_web_stats.cjs` PASS, `test_practice_studio.cjs` PASS (5 viewports), 92 tests unitarios Python PASS, 0 diff entre `dist/` y `docs/`. Ficha: [[tasks/2026-09-17-2315-antigravity-redinseo-biblioteca-navegacion]].
+
+## 2026-09-17 — Cierre de diseño e indicaciones del resto
+
+- Codex revalidó la entrega de Juegos y terminó grid móvil sin recortes/superposición y contraste del CTA oscuro. E2E5 condiciones PASS,30 capturas; audio/reduced-motion/seis modos y regresión UX PASS. Evidencia y límites: [[tasks/2026-09-17-2300-codex-cierre-diseno]].
+- Activos practice.html/css/js y sw.js actualizados en instalación local con copia recuperable y paridad SHA256; motor/biblioteca sin cambios, no instalador nuevo ni publicación. Caché específica web-stats-studio-final.
+- Plan del resto con etapas, componentes, aceptación y prompt del ejecutor: [[tasks/2026-09-17-2305-codex-plan-diseno-resto]]. Solo plan, no ejecución. Historial anterior conservado en [[archive/2026-09|archivo septiembre2026]].
+
+## 2026-09-17 — Coherencia de estadísticas y robustez offline en Modo Web
+
+- Antigravity resolvió las incoherencias matemáticas y funcionales de las estadísticas en la versión web (GitHub Pages / Vercel / PWA):
+  1. Clasificación exhaustiva del 100% de tarjetas en `cardBreakdown` (distribuyendo tarjetas con estado `due` en jóvenes o maduras según intervalo), logrando que la suma de categorías coincida exactamente con `totalCards`.
+  2. Inclusión de tarjetas pendientes `due` en las distribuciones de intervalos (`intervals`) y facilidad (`ease`), evitando que mazos con tarjetas repasadas muestren "Aún no hay tarjetas graduadas" o "SIN DATOS".
+  3. Exclusión de tarjetas nuevas del pronóstico de repasos futuros (`forecast`).
+  4. Cálculo de porcentajes de retención reales por período en `retentionTable`.
+  5. Suministro de `questionSnippet` y `recommendation` en `cards/weak` eliminando `undefined` en la UI.
+  6. Normalización de endpoints offline en `practice.js` (`/api/practice/result`, `/api/practice/history`, `/api/decks`, `/api/import/text/`) evitando errores 404 en hosting estático.
+- Validación: `tests/test_web_stats.cjs` PASS, `test_study_blocks_and_preview.cjs` PASS (Chromium 4 viewports), 92/92 pruebas Python PASS, 0 diff entre `dist/` y `docs/`, `tools/check-brain.ps1` OK. Ficha: [[tasks/2026-09-17-1756-antigravity-coherencia-estadisticas-web]].
 
 ## 2026-09-17 — Estadísticas y puntos débiles dinámicos en Modo Web
 
@@ -129,90 +192,3 @@ updated: 2026-09-17
 - Archivos: `dist/practice.js`, `docs/practice.js`, `tests/test_ux_study_audio.cjs`.
 - Validación reportada por Antigravity: 6 suites Node/JS (todas pasan), 87 pruebas Python `unittest` en `.venv` (todas pasan), `node --check` OK y `git diff --check` OK. La revisión final de Codex verificó los ocho pares frontend modificados de `dist/`/`docs/` como idénticos.
 - Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Segunda revisión UX: correcciones principales validadas, queda una carrera de audio
-
-- Resultado: controles de Estudio, alturas, cuadrícula móvil, fondos claro/oscuro, icono de Juegos y filtro de `postMessage` pasan la revisión independiente. La tarea vuelve a Antigravity por un único P2: el callback tardío del audio anterior elimina la clase `playing` del nuevo.
-- Evidencia: UI aislada a 1366×768, 1024×768 y 390×844; botón de Juegos 40×40 con SVG 18×18; audio sintético embebido/global/tecla `R`; prueba VM adicional que falla al disparar realmente `firstAudio.onended()`.
-- Automatización: seis suites Node/JS y 87 `unittest` pasan; sintaxis JS, `git diff --check` y ocho pares SHA256 `dist`/`docs` correctos. La prueba nueva da falso positivo para el callback tardío.
-- Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Correcciones UX de Estudio, Juegos y audio completadas
-
-- Resultado: Antigravity aplicó las correcciones solicitadas por Codex. Se corrigió la especificidad del fondo oscuro de `html`, se desocultaron los controles de Estudio (eliminado `:first-child`) y se añadió una prueba conductual de `AudioPlayer` con un objeto `FakeAudio`.
-- Archivos: `dist/practice.css`, `dist/student.css`, `docs/practice.css`, `docs/student.css`, `tests/test_ux_study_audio.cjs`.
-- Validación: 6 suites Node/JS + 87 Python: todo verde. `git diff --check` OK. SHA256 dist/docs idénticos. `tools/check-brain.ps1` en `OK`. Tarea `lista_para_relevo` a la espera de la revisión de Codex.
-- Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Revisión UX de Estudio, Juegos y audio no aprobada
-
-- Resultado: Codex devolvió la implementación a Antigravity. La regla heredada de la barra inferior oculta el único contenedor y deja sin `Mostrar respuesta` ni calificaciones; una regla duplicada comprime el SVG de audio de Juegos; `html` conserva fondo claro en tema oscuro; el receptor de `postMessage` no filtra origen/ventana.
-- Archivos revisados: diff completo de `dist/`, `docs/`, pruebas y memoria; solo se actualizó `brain/` durante la revisión.
-- Validación: seis suites Node/JS y 87 `unittest` pasan, sintaxis JS correcta, `git diff --check` sin errores y ocho pares `dist/`/`docs/` idénticos. UI sintética fallida en 1366×768, 1024×768 y 390×844; la prueba de audio de Juegos no es conductual.
-- Ficha y correcciones priorizadas: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Implementación UX de Estudio, Juegos y audio completada
-
-- Resultado: Antigravity implementó los tres defectos UX. Juegos: dark theme sync + 100dvh. Estudio: topbar 50px, bottom-bar 74px, `.anki-study-stage` flex, iframe adaptativo con `clamp()`. Audio: `AudioController` con limpieza de timers y comparación de instancia; `AudioPlayer` con `prevAudio.pause()+currentTime=0`; botones solo icono SVG con `aria-label`. Caché renovada a `20260915-ux`.
-- Archivos: `dist/app.js`, `dist/app.css`, `dist/student.css`, `dist/practice.js`, `dist/practice.css`, `dist/practice.html`, `dist/index.html`, `dist/sw.js`; espejos en `docs/`; `tests/test_ux_study_audio.cjs` (nuevo), `tests/test_server.py`, `tests/test_practice_http.py`.
-- Validación: 6 suites Node/JS + 87 Python: todo verde. `git diff --check` OK. SHA256 dist/docs idénticos. Validación visual y audio funcional pendientes para Codex.
-- Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Plan UX de Estudio, Juegos y audio preparado para Antigravity
-
-- Resultado: Codex localizó los estilos y controladores implicados, definió criterios medibles para aprovechar el viewport, integrar los controles con la tarjeta, eliminar el fondo blanco y repetir audio mediante iconos accesibles.
-- Archivos previstos: `dist/app.js`, `dist/app.css`, `dist/student.css`, `dist/practice.js`, `dist/practice.css`, HTML/SW versionados, espejos de `docs/` y pruebas frontend.
-- Validación: inspección estática y contraste con capturas; `tools/check-brain.ps1` en `OK` (22 notas, 68 enlaces, 7 fichas, 3 entradas). Código, audio y UI todavía no modificados ni probados; la ficha queda `lista_para_relevo` para Antigravity.
-- Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-15 — Avances consolidados subidos a GitHub y desplegados en Vercel
-
-- Resultado: suite completa validada (87 pruebas Python y 5 suites Node/JS), activos sincronizados de `dist/` a `docs/`, exclusión de DLLs temporales de raíz en `.gitignore`, commit `8e0cec5` subido con éxito a `origin/main` en GitHub y despliegue en producción verificado en `https://lumcards.vercel.app` (código HTTP 200, scripts y estilos actualizados).
-- Archivos: `.gitignore`, `dist/`, `docs/`, `clean_engine.py`, `brain/` y archivos del repositorio.
-- Validación: suites automatizadas 100% OK, `git push origin main` con salida 0, comprobación HTTP directa de Vercel y `tools/check-brain.ps1` en `OK`. Ficha: [[tasks/2026-09-15-1307-antigravity-subir-github-desplegar-vercel]].
-
-## 2026-09-15 — Capacidades de Codex y Antigravity inventariadas
-
-- Resultado: registradas 83 skills declaradas y nueve servidores MCP visibles de Antigravity, además de las capacidades actuales de Codex, su aplicación probable a Lumcards y el protocolo para pedir herramientas nuevas.
-- Límites: inventario basado en capturas/listado aportados; no se probaron credenciales ni llamadas reales. Ninguna capacidad se trató como autorización para operar servicios externos.
-- Archivos: `brain/10_AGENT_CAPABILITIES.md`, portada, estado, backlog, decisiones, relevo y ficha.
-- Validación: 83/83 nombres presentes, `git diff --check -- brain` sin errores y `tools/check-brain.ps1` en `OK` (21 notas, 59 enlaces, 6 fichas, 3 entradas de agente). Ficha: [[tasks/2026-09-15-1306-codex-capacidades-agentes]].
-
-## 2026-09-15 — Carpetas, renombrado y Mi progreso restaurados
-
-- Resultado: normalización y migración respaldada de jerarquías, fusión de duplicados sin pérdida de tarjetas, carpetas vacías persistentes, totales agregados, creación/movimiento/renombrado visibles y contrato completo de estadísticas detalladas.
-- Archivos: `clean_engine.py`, `server.py`, `dist/app.js`, `dist/index.html`, `dist/sw.js`, pruebas y `brain/`.
-- Validación: 87 pruebas Python y cinco suites Node/JS correctas; API y UI reales verificadas con 3.971 tarjetas conservadas, una carpeta con siete mazos, `Mi progreso` operativo y consola sin errores. No se empaquetó ni publicó una nueva versión.
-- Ficha y continuidad: [[tasks/2026-09-15-0047-codex-regresiones-motor-carpetas-progreso]], [[08_HANDOFF]].
-
-## 2026-09-14 — Motor limpio independiente sin AGPL y corrección de juegos
-
-- Resultado: Implementado y completado el motor limpio independiente `clean_engine.py` (Python puro + SQLite) con eliminación total de `anki==26.8.1`. Soporte universal para tarjetas básicas, inversas, cloze, oclusión de imagen nativa, medios comprimidos con zstandard, historial `revlog` y cálculo de estadísticas. Corregida filtración de `frontKey`/`backKey` en `dist/study-games.js`.
-- Archivos: `clean_engine.py`, `engine.py`, `dist/study-games.js`, `requirements-lock.txt`, `brain/`.
-- Validación: 83 pruebas de Python pasando 100% en verde; 5 suites de Node/JS pasando 100% en verde.
-- Ficha y continuidad: [[tasks/2026-09-14-2240-antigravity-motor-independiente]], [[08_HANDOFF]].
-
-## 2026-09-13 — Memoria para Codex, Antigravity y Claude
-
-- Resultado: protocolo unico, reglas de entrada, checkpoints, relevo, guia y plantillas por tarea.
-- Archivos: `AGENTS.md`, `CLAUDE.md`, `.agents/rules/brain.md`, `brain/`, `tools/check-brain.ps1`.
-- Validacion: verificador OK; prueba negativa detecta cuatro clases de errores. Carga en otras herramientas aun no comprobada.
-- Ficha y continuidad: [[tasks/2026-09-13-2254-codex-cerebro]], [[08_HANDOFF]].
-
-## 2026-09-13 — Cerebro de Obsidian
-
-- Resultado: creado vault documental, índice mínimo e instrucciones persistentes para Codex.
-- Archivos: `AGENTS.md`, `.obsidian/`, `brain/`.
-- Validación: enlaces locales y estructura comprobados; Obsidian detectado en este equipo.
-
-## 2026-09-13 — Limpieza del proyecto
-
-- Resultado: eliminados `node_modules`, cachés Firebase/Android/Python, compilaciones Android y registros temporales.
-- Conservado: colección, historial de práctica, copias, APK, ZIP, `.venv`, instaladores y código exportado.
-- Validación: 20 pruebas del importador pasan; el motor y servidor importan correctamente.
-
-## 2026-09-11 — Escritorio, juegos e importación
-
-- Resultado: ventana Windows con WebView2; elección, escritura y parejas; vista previa e importación de texto; historial de partidas.
-- Validación histórica: prueba nativa de escritorio, pruebas HTTP temporales y rondas de interfaz completadas.
-- Nota: el repositorio recibió cambios posteriores; volver a ejecutar la suite completa antes de publicar.

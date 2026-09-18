@@ -64,6 +64,13 @@ async function noTextIllustrationOverlap(page, stage) {
   const overlaps = await page.evaluate(() => {
     const collisions = [];
     for (const card of document.querySelectorAll('.studio-primary-modes .play-mode')) {
+      const bounds = card.getBoundingClientRect();
+      for (const paper of card.querySelectorAll('.studio-paper')) {
+        const art = paper.getBoundingClientRect();
+        if (art.left < bounds.left + 4 || art.right > bounds.right - 4) {
+          collisions.push('Clipped illustration: ' + card.querySelector('h2')?.textContent);
+        }
+      }
       const paragraph = card.querySelector('p');
       if (!paragraph) continue;
       const range = document.createRange();

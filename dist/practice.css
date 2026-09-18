@@ -1831,6 +1831,7 @@ body.practice-studio { --studio-sidebar: 212px; background: var(--bg); font-fami
 .practice-studio .studio-mode p { font-size: 13px; line-height: 1.6; margin: 0 0 16px; }
 .practice-studio .studio-mode .btn { background: transparent!important; color: var(--studio-accent)!important; border: 1px solid var(--lum-indigo)!important; border-radius: 11px; min-height: 44px; font-size: 13px; padding: 9px 14px; margin-top: auto; box-shadow: none!important; }
 .practice-studio .studio-mode-learn .btn { background: #6554df!important; color: #fff!important; border-color: #6554df!important; }
+.dark .practice-studio .studio-mode-learn .btn { color: #fff!important; }
 .practice-studio .studio-mode .btn:disabled { opacity: .5; cursor: not-allowed; }
 .practice-studio .studio-mode .btn:not(:disabled):hover { background: var(--soft)!important; }
 .practice-studio .studio-mode-learn .btn:not(:disabled):hover { background: #5140c4!important; }
@@ -1919,11 +1920,12 @@ body.practice-studio { --studio-sidebar: 212px; background: var(--bg); font-fami
   .studio-section-heading { display: block; margin-bottom: 16px; }
   .studio-section-heading p { margin-top: 5px; }
   .practice-studio .play-modes { grid-template-columns: 1fr!important; gap: 12px; }
-  .practice-studio .studio-primary-modes .studio-mode { padding: 20px!important; }
-  .studio-primary-modes .studio-art { position: absolute; top: 24px; right: 14px; width: 122px; height: 112px; transform: scale(.58); transform-origin: right center; }
-  .practice-studio .studio-primary-modes h2 { margin-top: 16px; font-size: 26px; padding-right: 100px; }
-  .practice-studio .studio-primary-modes p { padding-right: 120px; font-size: 13px; min-height: 62px; }
-  .practice-studio .studio-primary-modes .btn { margin-top: 4px; }
+  .practice-studio .studio-primary-modes .studio-mode { padding: 20px!important; display: grid; grid-template-columns: minmax(0,1fr) 104px; column-gap: 12px; }
+  .studio-primary-modes .play-mode-tag { grid-column: 1/-1; justify-self: start; }
+  .studio-primary-modes .studio-art { position: relative; top: auto; right: auto; grid-column: 2; grid-row: 2/4; align-self: center; justify-self: center; width: 104px; height: 110px; margin: 0; transform: scale(.58); transform-origin: center; }
+  .practice-studio .studio-primary-modes h2 { grid-column: 1; grid-row: 2; margin-top: 16px; font-size: clamp(22px,6.7vw,26px); padding-right: 0; }
+  .practice-studio .studio-primary-modes p { grid-column: 1; grid-row: 3; padding-right: 0; font-size: 13px; min-height: 0; }
+  .practice-studio .studio-primary-modes .btn { grid-column: 1/-1; margin-top: 4px; }
   .practice-studio .studio-secondary-modes .studio-mode { grid-template-columns: 40px minmax(0,1fr); }
   .practice-studio .studio-secondary-modes .studio-art { transform: none; }
   .practice-studio.studio-session .play-main { padding: 12px; }

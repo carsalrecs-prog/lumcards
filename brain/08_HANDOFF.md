@@ -1,47 +1,48 @@
 ---
 tags: [lumcards, relevo]
-updated: 2026-09-17
+updated: 2026-09-18
 ---
 
 # Relevo actual
 
 ## Control
 - Agente: Antigravity.
-- Actualizado: 2026-09-17T16:45:00-05:00.
-- Estado: lista_para_relevo.
-- Tarea: [[tasks/2026-09-17-1632-antigravity-estadisticas-modo-web]].
-- Entorno: `D:\CODEX`, rama `main`, commit `d4333ed`, push confirmado a `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`).
+- Actualizado: 2026-09-18T00:54:00-05:00.
+- Estado: hecha.
+- Tarea: [[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]].
+- Entorno: D:\CODEX, main/base cfd9fb6. Cambios ajenos y código de Codex preservados. Sin commit/push en este cierre.
 
 ## Hecho
-- Petición del usuario solucionada: "no funciona el apartado de estadisticas en la web puedes ayudarme?".
-- Diagnóstico resuelto:
-  1. En Modo Web (`webApi`), `stats/detailed` devolvía un objeto stub estático con valores en cero/vacíos (`cardBreakdown` con 0 salvo total, `forecast` en 0, `addedCards` vacío mostrando "SIN DATOS", `intervals` y `ease` vacíos).
-  2. El parámetro `deckId` y el filtro de ámbito por mazo/submazo eran ignorados por `webApi`.
-  3. La ruta `route.startsWith('cards/')` interceptaba `cards/weak` devolviendo una tarjeta ficticia no encontrada con id `'weak'`.
-  4. En `webApi('review')`, no se guardaba historial en `_revlogs`.
-- Cambios implementados en `dist/app.js` y `docs/app.js`:
-  1. `webApi('stats/detailed')`: cálculo dinámico y completo de `today`, `forecast` (30, 90, 365 días), `cardBreakdown` clasificado por estado real (`new`, `learning`, `young`, `mature`, `suspended`, `buried`), `calendar` (generación completa de días del año consultado), `history`, `intervals`, `ease`, `retention`, `retentionTable`, `hourly`, `buttonPresses` y `addedCards`.
-  2. Soporte de filtro por mazo y submazos jerárquicos (`targetDeck.name` y `${targetDeck.name}::*`).
-  3. Reubicación y activación de la ruta `cards/weak` antes de `cards/` para detectar correctamente tarjetas sanguijuelas (lapses >= 3), facilidad crítica (< 180%) y preguntas largas.
-  4. Registro de repasos en `store._revlogs` al ejecutar `webApi('review')` (con límite de 5000 entradas) y soporte para `id`/`cardId` y `elapsedMs`/`time`.
-  5. Generación de IDs únicos con bucle `while (store.decks.some(...))` y `while (store.cards.some(...))` evitando colisiones en creaciones síncronas.
-  6. Renovada la versión de caché a `20260917-web-stats` en `dist/` y `docs/` (`index.html`, `practice.html`, `sw.js`).
-  7. Actualizados `tests/test_server.py`, `tests/test_practice_http.py`, `tests/test_ux_study_audio.cjs` y creada la suite `tests/test_web_stats.cjs`.
+- **Diagnóstico y resolución de error de arranque en Lumcards.exe ([[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]])**:
+  - Causa raíz: conflicto de puerto en segundo intento de enlace (`WinError 10048`), donde `start.ps1` lanzaba excepción prematuramente al salir el proceso duplicado sin verificar si la primera instancia ya estaba viva y saludable.
+  - Mitigaciones de robustez:
+    1. `server.py`: `valid_host` valida loopback (`127.0.0.1`, `localhost`, `0.0.0.0`) inmediatamente sin conexiones UDP externas a `8.8.8.8`.
+    2. `start.ps1`: antes de arrojar fallo al salir el proceso hijo, efectúa una comprobación de salud de contingencia contra `/api/health`; si el servidor ya está escuchando y sano, sale con código 0.
+    3. `tools/launcher.cs`: antes de lanzar `InvalidOperationException`, consulta `IsHealthyAsync()`; sonda de salud con timeout ampliado a 2500ms.
+    4. Compilación limpia con `tools/build-desktop.ps1 -StageOnly`.
+  - El servidor local actual (PID 23168) está 100% activo, sano y respondiendo con las 3.972 tarjetas intactas. Basta con pulsar "Volver a intentar" en la ventana para acceder inmediatamente.
+- **Etapas 1, 2 y 3 del rediseño Studio concluidas**:
+  - Modales, Explorador de tarjetas, Estadísticas, Estudio y Biblioteca unificados bajo la estética Studio marfil/índigo con 0 desbordamiento horizontal en 5 viewports.
 
 ## Validación
-- `node tests/test_web_stats.cjs`: OK (prueba completa en VM de `stats/detailed` general y por mazo, `cards/weak`, `_revlogs` tras repaso).
-- `node tests/test_web_study_blocks.cjs`: OK.
-- `node tests/test_frontend.cjs`: OK.
-- `node tests/test_ux_study_audio.cjs`: OK.
-- `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`: 92/92 pruebas OK en 18.4s.
-- Paridad estricta comprobada (`git diff --no-index`) entre los pares de `dist/` y `docs/`.
+- `curl.exe http://127.0.0.1:8765/api/health`: 200 OK (`app: lumcards`, `ok: true`).
+- `curl.exe http://127.0.0.1:8765/api/state`: 200 OK (3.972 tarjetas, racha 4 días, estadísticas completas).
+- `tools/build-desktop.ps1 -StageOnly`: PASS.
+- `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`: PASS (92 pruebas en 17.8s, OK).
+- Paridad `dist/` vs `docs/`: 0 diff verificado en `student.css`, `app.css`.
+
+## Contexto ajeno preservado
+- Diseño de Jugar y aprender (Studio) completado por Codex en [[tasks/2026-09-17-2300-codex-cierre-diseno]]: 100% conservado.
+- Etapas 1, 2 y 3 ([[tasks/2026-09-17-2315-antigravity-redinseo-biblioteca-navegacion]], [[tasks/2026-09-17-2337-antigravity-estudio-visor-tarjetas-studio]], [[tasks/2026-09-18-0020-antigravity-explorador-modales-estadisticas-studio]]): 100% conservadas.
+- Base de datos SQLite y datos del usuario intactos bajo `data/`.
 
 ## Pendiente
-- Ninguno para esta tarea.
+- El usuario puede pulsar "Volver a intentar" en la ventana de Lumcards abierta para continuar de inmediato.
+- Opcionales restantes según el plan maestro: Etapa 4 (Mi espacio, ajustes y sincronización) o cierre de rediseño.
 
 ## Primer paso
-- Subir cambios a GitHub `origin/main` y comunicar al usuario.
+- Indicar al usuario la solución inmediata (hacer clic en "Volver a intentar") y el diagnóstico completado.
 
 ## Bloqueos y procesos
 - Bloqueos: ninguno.
-- Procesos activos: servidor local Lumcards en puerto 8765.
+- Procesos activos: `python.exe` PID 23168 (servidor local en puerto 8765), `Lumcards.exe` PID 13612 (ventana nativa en pantalla).

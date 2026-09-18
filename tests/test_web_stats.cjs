@@ -5,7 +5,7 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const noop = () => {};
-const element = { addEventListener: noop, classList: { toggle: noop }, innerHTML: '' };
+const element = { append: noop, querySelector: () => null, querySelectorAll: () => [], addEventListener: noop, setAttribute: noop, getAttribute: () => null, appendChild: noop, replaceChildren: noop, remove: noop, classList: { toggle: noop, contains: () => false, add: noop, remove: noop }, innerHTML: '', style: {} };
 
 const storage = {};
 const mockLocalStorage = {
@@ -55,10 +55,32 @@ vm.runInContext(source, context);
   assert.ok(detailedAll.cardBreakdown, 'Detailed stats should have cardBreakdown');
   assert.ok(detailedAll.cardBreakdown.total >= 2, 'Total cards should include created cards');
   assert.ok(detailedAll.cardBreakdown.new.count >= 2, 'New cards count should include created cards');
+
+  // Verify mathematical coherence: breakdown categories must sum EXACTLY to totalCards
+  const b = detailedAll.cardBreakdown;
+  const breakdownSum = b.new.count + b.learning.count + b.relearning.count + b.young.count + b.mature.count + b.suspended.count + b.buried.count;
+  assert.equal(breakdownSum, b.total, `Breakdown sum (${breakdownSum}) must match total cards (${b.total})`);
+
+  // Verify intervals and ease are populated from review cards (starter cards include review cards)
+  assert.ok(detailedAll.intervals.totalReviewCards > 0, 'Review cards should be counted in intervals');
+  assert.ok(detailedAll.ease.totalCardsWithEase > 0, 'Cards with ease should be counted in ease');
+  assert.ok(detailedAll.intervals.avgInterval > 0, 'Avg interval should be > 0');
+  assert.ok(detailedAll.ease.avgEase >= 200, 'Avg ease should be >= 200%');
+
+  // Verify forecast excludes new unstudied cards
   assert.ok(detailedAll.forecast.days30.length === 31, 'Forecast 30 days should have 31 entries');
   assert.ok(Array.isArray(detailedAll.calendar.days), 'Calendar days should be an array');
   assert.ok(detailedAll.calendar.days.length >= 365, 'Calendar should have full year of days');
   assert.ok(detailedAll.addedCards.all.series.length > 0, 'Added cards series should have data');
+
+  // Verify retention table has 5 periods with computed values
+  assert.equal(detailedAll.retentionTable.length, 5, 'Retention table should have 5 period rows');
+  assert.ok(detailedAll.retentionTable.every(r => typeof r.label === 'string' && r.young !== undefined && r.mature !== undefined), 'Retention table rows must have young and mature definitions');
+
+  // Verify root properties for parity with clean_engine
+  assert.equal(detailedAll.totalCards, detailedAll.cardBreakdown.total, 'Root totalCards should match breakdown total');
+  assert.ok('reviewedToday' in detailedAll, 'Root should have reviewedToday');
+  assert.ok('retentionRate' in detailedAll, 'Root should have retentionRate');
 
   // Test stats/detailed filtered by subdeck
   const detailedSub = await vm.runInContext(`webApi('stats/detailed?deckId=${encodeURIComponent(subDeck.id)}')`, context);
@@ -82,6 +104,7 @@ vm.runInContext(source, context);
   const detailedAfterRev = await vm.runInContext("webApi('stats/detailed')", context);
   assert.ok(detailedAfterRev.today.cardsStudied >= 1, 'Cards studied today should be >= 1');
   assert.ok(detailedAfterRev.today.timeSeconds > 0, 'Time spent today should be > 0');
+  assert.equal(detailedAfterRev.today.cardsStudied, detailedAfterRev.today.reviewCount + detailedAfterRev.today.learnCount, 'Cards studied today must equal reviewCount + learnCount');
 
   // Test cards/weak endpoint
   const weakBefore = await vm.runInContext("webApi('cards/weak')", context);
@@ -104,6 +127,51 @@ vm.runInContext(source, context);
   const leech = weakAfter.cards.find(c => String(c.id) === String(c1.id));
   assert.ok(leech, 'Identified card c1 as weak/leech');
   assert.equal(leech.lapses, 4);
+  assert.ok(leech.questionSnippet && !leech.questionSnippet.includes('undefined'), 'questionSnippet must be valid');
+  assert.ok(leech.recommendation && !leech.recommendation.includes('undefined'), 'recommendation must be valid');
 
-  console.log('All Web Mode stats and weak cards tests passed successfully!');
+  // Test deck config persistence
+  await vm.runInContext(`webApi('decks/config', { deckId: ${JSON.stringify(parentDeck.id)}, newPerDay: 25, revPerDay: 150 })`, context);
+  const fetchedConfig = await vm.runInContext(`webApi('decks/config?deckId=${encodeURIComponent(parentDeck.id)}')`, context);
+  assert.equal(fetchedConfig.newPerDay, 25, 'Deck config newPerDay should be saved');
+  assert.equal(fetchedConfig.revPerDay, 150, 'Deck config revPerDay should be saved');
+
+  // ── Practice.js autonomous offline API tests ──
+  const practiceContext = vm.createContext({
+    document: {
+      querySelector: () => element,
+      querySelectorAll: () => [],
+      getElementById: () => null,
+      createElement: () => element,
+      createTextNode: () => element,
+      addEventListener: noop,
+      documentElement: element,
+      body: element
+    },
+    window: { addEventListener: noop, location: { hostname: 'carsalrecs-prog.github.io', hash: '' } },
+    location: { hostname: 'carsalrecs-prog.github.io', hash: '' },
+    history: { replaceState: noop, pushState: noop },
+    localStorage: mockLocalStorage,
+    setTimeout: noop,
+    clearTimeout: noop,
+    fetch: () => Promise.reject(new TypeError('Failed to fetch (offline)')),
+    URLSearchParams,
+    URL,
+    Intl,
+    console,
+    TextDecoder
+  });
+
+  const practiceSource = fs.readFileSync(path.join(root, 'dist/practice.js'), 'utf8').replace(/^boot\(\);$/m, '');
+  vm.runInContext(practiceSource, practiceContext);
+
+  // Test practice/result and practice/history in practiceContext
+  const saveRes = await vm.runInContext("window.api('/api/practice/result', { id: 'game-1', mode: 'quiz', deckName: 'Farmacología', correct: 8, total: 10, mistakes: 2, elapsedMs: 45000 })", practiceContext);
+  assert.equal(saveRes.success, true, 'Practice result save succeeded offline');
+
+  const histRes = await vm.runInContext("window.api('/api/practice/history')", practiceContext);
+  assert.ok(Array.isArray(histRes), 'Practice history should be an array');
+  assert.ok(histRes.some(h => h.id === 'game-1' && h.correct === 8), 'Practice history contains saved game');
+
+  console.log('All Web Mode stats, coherence, weak cards, and practice offline tests passed successfully!');
 })();

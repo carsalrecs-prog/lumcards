@@ -377,8 +377,8 @@
       }
       return await response.json();
     } catch (err) {
-      // Soporte autónomo para Modo Web Cloud (Vercel / Offline)
-      if (path.includes('/api/state') || path.includes('/api/exam/start')) {
+      // Soporte autónomo para Modo Web Cloud (GitHub Pages / Vercel / PWA / Offline)
+      if (path.includes('/api/state') || path.includes('/api/exam/start') || path.includes('/api/practice/result') || path.includes('/api/practice/history') || path.includes('/api/decks') || path.includes('/api/import/text/')) {
         try {
           const rawStore = localStorage.getItem('lumcards_web_data');
           if (rawStore) {
@@ -423,6 +423,98 @@
                 }
               }
               return { cards: uniqueCards.slice(0, 200) };
+            }
+            if (path.includes('/api/practice/result')) {
+              if (!store._practice_history) store._practice_history = [];
+              const resultItem = {
+                id: body?.id || Date.now(),
+                mode: body?.mode || 'quiz',
+                deck_name: body?.deckName || 'General',
+                correct: Number(body?.correct) || 0,
+                total: Number(body?.total) || 0,
+                mistakes: Number(body?.mistakes) || 0,
+                elapsed_ms: Number(body?.elapsedMs) || 0,
+                completed_at: new Date().toISOString()
+              };
+              store._practice_history.unshift(resultItem);
+              if (store._practice_history.length > 100) {
+                store._practice_history = store._practice_history.slice(0, 100);
+              }
+              if (store.stats) {
+                store.stats.reviewedToday = (store.stats.reviewedToday || 0) + (resultItem.correct || 1);
+              }
+              localStorage.setItem('lumcards_web_data', JSON.stringify(store));
+              return { success: true, id: resultItem.id };
+            }
+            if (path.includes('/api/practice/history')) {
+              return store._practice_history || [];
+            }
+            if (path.includes('/api/decks')) {
+              if (body?.name) {
+                let newId = Date.now();
+                while ((store.decks || []).some(d => d.id === newId)) newId++;
+                const newD = {
+                  id: newId,
+                  name: String(body.name).trim(),
+                  shortName: String(body.name).split('::').at(-1).trim(),
+                  total: 0,
+                  new: 0,
+                  learn: 0,
+                  due: 0,
+                  parentName: '',
+                  isFolder: false,
+                  childIds: []
+                };
+                if (!store.decks) store.decks = [];
+                store.decks.push(newD);
+                localStorage.setItem('lumcards_web_data', JSON.stringify(store));
+                return newD;
+              }
+              return store.decks || [];
+            }
+            if (path.includes('/api/import/text/preview')) {
+              let textContent = '';
+              if (raw && body instanceof Uint8Array) {
+                textContent = new TextDecoder('utf-8').decode(body);
+              } else if (typeof body === 'string') {
+                textContent = body;
+              }
+              const lines = textContent.split(/\r?\n/).filter(l => l.trim().length > 0);
+              const previewCards = lines.slice(0, 10).map((l, i) => {
+                const sep = l.includes('\t') ? '\t' : (l.includes(';') ? ';' : ',');
+                const parts = l.split(sep);
+                return { index: i + 1, front: parts[0]?.trim() || l, back: parts.slice(1).join(sep).trim() || '' };
+              });
+              return { total: lines.length, preview: previewCards, cards: previewCards };
+            }
+            if (path.includes('/api/import/text/commit')) {
+              const newCards = (body?.cards || []).map((c, i) => ({
+                id: Date.now() + i,
+                deckId: Number(body?.deckId) || store.decks?.[0]?.id || 1,
+                modelName: 'Básica',
+                front: c.front || '',
+                back: c.back || '',
+                rawFront: c.front || '',
+                rawBack: c.back || '',
+                tags: [],
+                reps: 0,
+                interval: 0,
+                ease: 2500,
+                due: 'Nueva',
+                state: 'new',
+                starred: false,
+                editable: true
+              }));
+              if (!store.cards) store.cards = [];
+              store.cards.unshift(...newCards);
+              const targetD = (store.decks || []).find(d => String(d.id) === String(body?.deckId));
+              if (targetD) {
+                targetD.total = (targetD.total || 0) + newCards.length;
+                targetD.new = (targetD.new || 0) + newCards.length;
+                targetD.due = (targetD.due || 0) + newCards.length;
+              }
+              localStorage.setItem('lumcards_web_data', JSON.stringify(store));
+              return { success: true, count: newCards.length, created: newCards.length };
             }
           }
         } catch (_) {}

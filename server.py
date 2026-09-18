@@ -47,8 +47,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def valid_host(self):
         host_header = self.headers.get('Host', '').split(':')[0]
+        if host_header in {'127.0.0.1', 'localhost', '0.0.0.0'}:
+            return True
         local_ip = self.engine.get_local_ip()
-        return host_header in {'127.0.0.1', 'localhost', local_ip, '0.0.0.0'}
+        return host_header == local_ip
 
     def headers_for(self, content_type, length, attachment=None, media=False):
         self.send_header('Content-Type', content_type)

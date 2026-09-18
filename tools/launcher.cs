@@ -178,7 +178,7 @@ namespace LumcardsDesktop
                 try
                 {
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(new Uri(options.Url, "/api/health"));
-                    request.Timeout = 1500; request.ReadWriteTimeout = 1500; request.Proxy = null;
+                    request.Timeout = 2500; request.ReadWriteTimeout = 2500; request.Proxy = null;
                     using (WebResponse response = request.GetResponse())
                     using (StreamReader reader = new StreamReader(response.GetResponseStream()))
                     {
@@ -209,7 +209,11 @@ namespace LumcardsDesktop
                 {
                     await Task.Delay(700);
                     if (await IsHealthyAsync()) return;
-                    if (process.HasExited && process.ExitCode != 0) throw new InvalidOperationException("No se pudo iniciar la biblioteca. Revisa data\\server-error.log en la carpeta de la aplicación.");
+                    if (process.HasExited && process.ExitCode != 0)
+                    {
+                        if (await IsHealthyAsync()) return;
+                        throw new InvalidOperationException("No se pudo iniciar la biblioteca. Revisa data\\server-error.log en la carpeta de la aplicación.");
+                    }
                 }
             }
             throw new TimeoutException("La biblioteca tarda más de lo esperado. Espera un momento y vuelve a intentarlo.");

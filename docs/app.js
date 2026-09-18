@@ -237,12 +237,21 @@ function getWebData() {
     { id: 204, deckId: 2, modelName: 'Básica', front: '¿Cuál es la velocidad aproximada de la luz en el vacío?', back: 'Aproximadamente <strong>300.000 km/s</strong> (299.792.458 m/s).', rawFront: '¿Cuál es la velocidad aproximada de la luz en el vacío?', rawBack: '300.000 km/s', reps: 0, interval: 0, ease: 2500, due: 'Nueva', state: 'new', starred: false, editable: true },
     { id: 205, deckId: 2, modelName: 'Básica', front: '¿Cuál es el océano más extenso de la Tierra?', back: '<strong>Océano Pacífico</strong>', rawFront: '¿Cuál es el océano más extenso de la Tierra?', rawBack: 'Océano Pacífico', reps: 0, interval: 0, ease: 2500, due: 'Nueva', state: 'new', starred: false, editable: true }
   ];
+  const now = Date.now();
+  const starterRevlogs = [
+    { id: now - 3600000 * 3, cid: 101, rating: 3, state: 'review', interval: 3, ease: 2500, time: 8000 },
+    { id: now - 3600000 * 2, cid: 102, rating: 3, state: 'review', interval: 1, ease: 2500, time: 5000 },
+    { id: now - 3600000 * 1, cid: 103, rating: 2, state: 'learn', interval: 0, ease: 2400, time: 12000 },
+    { id: now - 3600000 * 0.5, cid: 201, rating: 4, state: 'review', interval: 4, ease: 2600, time: 6000 }
+  ];
   const initial = {
     decks: starterDecks,
     cards: starterCards,
     stats: { reviewedToday: 4, streak: 3, totalCards: 11, dueToday: 6 },
     settings: { dailyGoal: 20 },
-    backups: []
+    backups: [],
+    _revlogs: starterRevlogs,
+    _practice_history: []
   };
   try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(initial)); } catch(_) {}
   return initial;
@@ -417,13 +426,37 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
       const isLeech = lapses >= 3;
       const ease = Math.round((c.ease || 2500) / 10);
       const isCrit = ease < 180;
-      const isLong = (c.front || '').length > 180;
+      const cleanSnippet = (c.front || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const isLong = cleanSnippet.length > 180;
       if (isLeech || isCrit || isLong) {
+        const questionSnippet = cleanSnippet.length > 90 ? cleanSnippet.slice(0, 87) + '…' : cleanSnippet;
+        let tip = 'Requiere atención para consolidar la memoria a largo plazo.';
+        let issue = 'warning';
+        let badge = `${lapses} fallos recientes`;
+        if (isLeech) {
+          issue = 'leech';
+          badge = `Sanguijuela · ${lapses} fallos`;
+          tip = 'Esta tarjeta genera errores repetidos. Simplifica su enunciado o divídela en dos ideas.';
+        } else if (isCrit) {
+          issue = 'critical_ease';
+          badge = `Dificultad alta · ${ease}% retención`;
+          tip = 'El intervalo crece muy lento por fallos anteriores. Añade un ejemplo o mnemotecnia.';
+        } else if (isLong) {
+          issue = 'too_long';
+          badge = `Pregunta extensa · ${cleanSnippet.length} car.`;
+          tip = 'La pregunta tiene demasiado texto. Conviene convertirla en preguntas atómicas.';
+        }
         weak.push({
           id: c.id,
           deckId: c.deckId,
           deckName: deckMap.get(String(c.deckId)) || 'Mazo',
           front: c.front,
+          questionSnippet: questionSnippet,
+          snippet: questionSnippet,
+          recommendation: tip,
+          tip: tip,
+          issue: issue,
+          badge: badge,
           lapses: lapses,
           ease: ease,
           isLeech: isLeech
@@ -533,7 +566,18 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     return d;
   }
   if (route === 'decks/config') {
-    return { newPerDay: 20, revPerDay: 200 };
+    if (method === 'POST' && body) {
+      if (!store.deckConfigs) store.deckConfigs = {};
+      const key = String(body.deckId || 'all');
+      store.deckConfigs[key] = {
+        newPerDay: Number(body.newPerDay) || 20,
+        revPerDay: Number(body.revPerDay) || 200
+      };
+      saveWebData(store);
+      return store.deckConfigs[key];
+    }
+    const key = String(params.get('deckId') || 'all');
+    return store.deckConfigs?.[key] || { newPerDay: 20, revPerDay: 200 };
   }
   if (route === 'study/block-info') {
     const deckId = params.get('deckId');
@@ -859,14 +903,32 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
 
     const totalCards = list.length;
     const counts = {
-      new: list.filter(c => c.state === 'new' && !c.suspended && !c.buried).length,
-      learning: list.filter(c => c.state === 'learn' && !c.suspended && !c.buried).length,
-      relearning: list.filter(c => c.state === 'relearn' && !c.suspended && !c.buried).length,
-      young: list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.interval || 0) < 21 && !c.suspended && !c.buried).length,
-      mature: list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.interval || 0) >= 21 && !c.suspended && !c.buried).length,
-      suspended: list.filter(c => c.suspended).length,
-      buried: list.filter(c => c.buried).length,
+      new: 0,
+      learning: 0,
+      relearning: 0,
+      young: 0,
+      mature: 0,
+      suspended: 0,
+      buried: 0
     };
+
+    list.forEach(c => {
+      if (c.suspended) {
+        counts.suspended++;
+      } else if (c.buried) {
+        counts.buried++;
+      } else if (c.state === 'relearn') {
+        counts.relearning++;
+      } else if (c.state === 'new' && (!c.reps || c.reps === 0) && (!c.interval || c.interval === 0)) {
+        counts.new++;
+      } else if ((c.interval || 0) >= 21) {
+        counts.mature++;
+      } else if ((c.interval || 0) >= 1 || c.state === 'review' || c.state === 'learned') {
+        counts.young++;
+      } else {
+        counts.learning++;
+      }
+    });
 
     const breakdownMeta = {
       new: ['Nuevas', '#5bb1e8'],
@@ -890,9 +952,18 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
 
     const forecastMap = {};
     list.forEach(c => {
-      if (c.state === 'due' || c.state === 'learn' || c.state === 'new') {
+      if (c.suspended || c.buried) return;
+      if (c.state === 'new' && (!c.reps || c.reps === 0) && (!c.interval || c.interval === 0)) {
+        return; // Tarjetas nuevas no entran en el pronóstico de repasos
+      }
+      if (c.state === 'due' || c.due === 'Hoy' || c.state === 'learn' || c.state === 'relearn') {
         forecastMap[0] = (forecastMap[0] || 0) + 1;
-      } else if (c.state === 'review' || c.state === 'learned') {
+      } else if (c.due === 'Mañana') {
+        forecastMap[1] = (forecastMap[1] || 0) + 1;
+      } else if (typeof c.due === 'string' && /^\d+d$/.test(c.due)) {
+        const days = parseInt(c.due, 10) || 1;
+        forecastMap[days] = (forecastMap[days] || 0) + 1;
+      } else {
         const ivl = Math.max(1, Number(c.interval) || 1);
         forecastMap[ivl] = (forecastMap[ivl] || 0) + 1;
       }
@@ -905,7 +976,7 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     const totalF90 = f90.reduce((s, x) => s + x.due, 0);
     const totalF365 = f365.reduce((s, x) => s + x.due, 0);
 
-    const reviewCards = list.filter(c => (c.state === 'review' || c.state === 'learned') && (c.reps || 0) > 0);
+    const reviewCards = list.filter(c => !c.suspended && !c.buried && ((c.interval || 0) >= 1 || c.state === 'review' || c.state === 'learned') && (c.reps || 0) > 0);
     const intervalMap = {};
     const easeMap = {};
     reviewCards.forEach(c => {
@@ -936,9 +1007,20 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     const allRevlogs = (store._revlogs || []).filter(r => cardIdSet.has(String(r.cid)));
     const todayStr = new Date().toISOString().slice(0, 10);
     const todayLogs = allRevlogs.filter(r => new Date(r.id).toISOString().slice(0, 10) === todayStr);
-    const todayTimeSec = todayLogs.reduce((s, r) => s + Math.round((r.time || 5000) / 1000), 0);
-    const todayCount = todayLogs.length || (deckId === 'all' || !deckId ? (store.stats.reviewedToday || 0) : 0);
-    const todayCorrect = todayLogs.filter(r => r.rating > 1).length;
+
+    let todayCount = todayLogs.length;
+    let todayTimeSec = todayLogs.reduce((s, r) => s + Math.round((r.time || 5000) / 1000), 0);
+    let todayCorrect = todayLogs.filter(r => r.rating > 1).length;
+    let todayReviewCount = todayLogs.filter(r => (r.interval || 0) >= 1).length;
+    let todayLearnCount = todayLogs.filter(r => (r.interval || 0) < 1).length;
+
+    if (todayCount === 0 && (!deckId || deckId === 'all') && (store.stats?.reviewedToday || 0) > 0) {
+      todayCount = store.stats.reviewedToday;
+      todayTimeSec = todayCount * 12;
+      todayReviewCount = Math.min(todayCount, 3);
+      todayLearnCount = todayCount - todayReviewCount;
+      todayCorrect = todayCount;
+    }
 
     const ranges = [30, 90, 365];
     const hourly = {};
@@ -973,8 +1055,8 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
       activityMap[dt].count++;
       activityMap[dt].timeSeconds += Math.round((r.time || 5000) / 1000);
     });
-    if ((store.stats.reviewedToday || 0) > 0 && todayLogs.length === 0 && (!deckId || deckId === 'all')) {
-      if (!activityMap[todayStr]) activityMap[todayStr] = { count: store.stats.reviewedToday, timeSeconds: store.stats.reviewedToday * 60 };
+    if ((store.stats?.reviewedToday || 0) > 0 && todayLogs.length === 0 && (!deckId || deckId === 'all')) {
+      if (!activityMap[todayStr]) activityMap[todayStr] = { count: store.stats.reviewedToday, timeSeconds: store.stats.reviewedToday * 12 };
     }
 
     const calendarDays = [];
@@ -1023,38 +1105,56 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     };
 
     const oneDayMs = 86400000;
-    const retPeriod = (sinceMs) => {
-      const filtered = allGradReviews.filter(r => r.id >= sinceMs);
-      const total = filtered.length;
-      const correct = filtered.filter(r => r.rating > 1).length;
-      return { count: total, total: total ? Math.round((correct / total) * 100) + '%' : 'N/A' };
-    };
-
     const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
     const startOfYesterday = new Date(startOfToday.getTime() - oneDayMs);
     const startOfWeek = new Date(startOfToday.getTime() - 7 * oneDayMs);
     const startOfMonth = new Date(startOfToday.getTime() - 30 * oneDayMs);
     const startOfYear = new Date(startOfToday.getTime() - 365 * oneDayMs);
 
-    const retentionTable = [
-      { key: '0', label: 'Hoy', young: 'N/A', mature: 'N/A', total: retPeriod(startOfToday.getTime()).total, count: retPeriod(startOfToday.getTime()).count },
-      { key: '1', label: 'Ayer', young: 'N/A', mature: 'N/A', total: retPeriod(startOfYesterday.getTime()).total, count: retPeriod(startOfYesterday.getTime()).count },
-      { key: '2', label: 'La semana pasada', young: 'N/A', mature: 'N/A', total: retPeriod(startOfWeek.getTime()).total, count: retPeriod(startOfWeek.getTime()).count },
-      { key: '3', label: 'El mes pasado', young: 'N/A', mature: 'N/A', total: retPeriod(startOfMonth.getTime()).total, count: retPeriod(startOfMonth.getTime()).count },
-      { key: '4', label: 'El año pasado', young: 'N/A', mature: 'N/A', total: retPeriod(startOfYear.getTime()).total, count: retPeriod(startOfYear.getTime()).count },
+    const periodDefs = [
+      { key: 'today', label: 'Hoy', filter: r => r.id >= startOfToday.getTime() },
+      { key: 'yesterday', label: 'Ayer', filter: r => r.id >= startOfYesterday.getTime() && r.id < startOfToday.getTime() },
+      { key: 'week', label: 'La semana pasada', filter: r => r.id >= startOfWeek.getTime() },
+      { key: 'month', label: 'El mes pasado', filter: r => r.id >= startOfMonth.getTime() },
+      { key: 'year', label: 'El año pasado', filter: r => r.id >= startOfYear.getTime() }
     ];
+
+    const retentionTable = periodDefs.map(p => {
+      const bucket = allGradReviews.filter(p.filter);
+      const young = bucket.filter(r => (r.interval || 0) < 21);
+      const mature = bucket.filter(r => (r.interval || 0) >= 21);
+      const rateText = (rows) => {
+        if (!rows.length) return 'N/A';
+        const ok = rows.filter(r => r.rating > 1).length;
+        return `${Math.round((ok / rows.length) * 100)}%`;
+      };
+      return {
+        key: p.key,
+        label: p.label,
+        young: rateText(young),
+        mature: rateText(mature),
+        total: rateText(bucket),
+        count: bucket.length
+      };
+    });
 
     const availableYears = Array.from(new Set(allRevlogs.map(r => new Date(r.id).getFullYear()).concat([new Date().getFullYear(), targetYear]))).sort();
 
+    const monthLogs = allRevlogs.filter(r => r.id >= Date.now() - 30 * 86400000);
+    const remembered = monthLogs.filter(r => r.rating > 1).length;
+    const retentionRate = monthLogs.length ? Math.round((remembered / monthLogs.length) * 100) : null;
+
     return {
+      deckId: deckId && deckId !== 'all' ? deckId : null,
+      deckName: deckName,
       today: {
         cardsStudied: todayCount,
         timeSeconds: todayTimeSec,
         timeMinutes: Math.round(todayTimeSec / 60),
         avgSecondsPerCard: todayCount ? Math.round(todayTimeSec / todayCount) : 0,
-        retentionToday: todayLogs.length ? Math.round((todayCorrect / todayLogs.length) * 100) : null,
-        reviewCount: todayLogs.filter(r => (r.interval || 0) >= 1).length,
-        learnCount: todayLogs.filter(r => (r.interval || 0) < 1).length
+        retentionToday: todayCount ? Math.round((todayCorrect / todayCount) * 100) : null,
+        reviewCount: todayReviewCount,
+        learnCount: todayLearnCount
       },
       forecast: {
         days30: f30,
@@ -1110,7 +1210,10 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
         days90: { total: addedLast(90).reduce((s, x) => s + x.count, 0), series: addedLast(90) },
         days365: { total: addedLast(365).reduce((s, x) => s + x.count, 0), series: addedLast(365) },
         all: { total: totalCards, series: addedAll }
-      }
+      },
+      totalCards: totalCards,
+      reviewedToday: todayCount,
+      retentionRate: retentionRate
     };
   }
   if (route === 'sync/info') {
@@ -2196,8 +2299,8 @@ function statistics(){
                   <button class="btn btn-quiet" data-action="reset-card" data-id="${w.id}" style="font-size:12px;padding:4px 10px;color:var(--orange)">Reiniciar progreso</button>
                 </div>
               </div>
-              <div class="weak-card-question">${esc(w.questionSnippet)}</div>
-              <div class="weak-recommendation">💡 <strong>Recomendación:</strong> ${esc(w.recommendation)}</div>
+              <div class="weak-card-question">${esc(w.questionSnippet || w.snippet || w.front || '')}</div>
+              <div class="weak-recommendation">💡 <strong>Recomendación:</strong> ${esc(w.recommendation || w.tip || '')}</div>
             </div>
           `).join('')}
         </div>
