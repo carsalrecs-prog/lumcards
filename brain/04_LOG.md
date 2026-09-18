@@ -5,6 +5,16 @@ updated: 2026-09-18
 
 # Registro de trabajo
 
+## 2026-09-18 — Publicación y despliegue web en producción (GitHub y Vercel)
+
+- Antigravity subió a GitHub y reflejó en Vercel el trabajo consolidado (commit `2ca8ba3`):
+  1. Rediseño integral Studio (Biblioteca y navegación, Estudio y visor de tarjetas con botones 1–4, Modales de 20px, Explorador de tarjetas y Estadísticas editoriales Georgia).
+  2. Ajustes de Jugar y aprender de Codex (arte adaptable, seis modos de práctica).
+  3. Coherencia matemática de estadísticas web y modo offline.
+  4. Robustez de arranque del servidor local y launcher (`start.ps1`, `server.py`, `launcher.cs`).
+  5. 4 nuevas suites de pruebas E2E en Chromium (`test_library_navigation_design.cjs`, `test_study_studio_design.cjs`, `test_studio_etapa3_design.cjs`, `test_static_web_e2e.cjs`).
+  6. Despliegue en vivo confirmado en `https://lumcards.vercel.app` (HTTP/2 200) y `https://lumcards.vercel.app/practice` (HTTP/2 200). Ficha: [[tasks/2026-09-18-0105-antigravity-subir-cambios-web-vercel-github]].
+
 ## 2026-09-18 — Diagnóstico y robustez del arranque de escritorio y servidor local
 
 - Antigravity diagnosticó el error reportado en `Lumcards.exe` (*"No se pudo iniciar la biblioteca. Revisa data\server-error.log"*):

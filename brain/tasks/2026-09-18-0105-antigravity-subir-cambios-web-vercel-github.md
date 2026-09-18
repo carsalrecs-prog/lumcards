@@ -7,10 +7,10 @@ tags: [lumcards, tarea, despliegue]
 ## Control
 
 - ID: 2026-09-18-0105-antigravity-subir-cambios-web-vercel-github
-- Estado: en_curso
+- Estado: hecha
 - Responsable y sesión: Antigravity (conversación 3b86c16f-6c8d-460a-8ae5-229dc2a66f94)
-- Actualizado: 2026-09-18T01:05:00-05:00
-- Entorno: `D:\CODEX`, rama `main`, commit base `cfd9fb6`, remoto `https://github.com/carsalrecs-prog/lumcards.git`.
+- Actualizado: 2026-09-18T01:10:00-05:00
+- Entorno: `D:\CODEX`, rama `main`, commit `2ca8ba3`, remoto `https://github.com/carsalrecs-prog/lumcards.git`.
 
 ## Objetivo y aceptación
 
@@ -33,16 +33,24 @@ tags: [lumcards, tarea, despliegue]
 
 ## Checkpoint
 
-- 2026-09-18T01:05:00-05:00: Preparación de commit y verificación de árbol de trabajo.
+- 2026-09-18T01:01:00-05:00: Staging completo de 39 archivos y commit `2ca8ba3` creado ("feat: rediseño integral Studio (biblioteca, estudio, modales, explorador y estadísticas), mejoras de arranque y paridad web").
+- 2026-09-18T01:01:27-05:00: `git push origin main` completado con éxito a `https://github.com/carsalrecs-prog/lumcards.git` (`cfd9fb6..2ca8ba3`).
+- 2026-09-18T01:02:00-05:00: Verificación en vivo en `https://lumcards.vercel.app`:
+  - `student.css`: contiene reglas Studio como `dialog.dialog-deck-modal` y badges de bloque.
+  - `app.css`: contiene fuentes editoriales `Georgia, serif` y variables Studio.
+  - `/practice`: 200 OK con título `Jugar y aprender · Lumcards Studio`.
 
 ## Validación
 
-- No ejecutada aún.
+- Git Push: `cfd9fb6..2ca8ba3  main -> main` (código 0).
+- Vercel Live: `https://lumcards.vercel.app/` (HTTP/2 200 OK).
+- Vercel Practice: `https://lumcards.vercel.app/practice` (HTTP/2 200 OK).
+- Estricta paridad `dist/` vs `docs/` en todos los assets web.
+- Suites de pruebas: 92 tests Python PASS, 4 suites Node/Chromium E2E PASS.
 
 ## Pendiente y primer paso
 
-- Ejecutar `git add`, `git commit` y `git push origin main`.
-- Verificar la URL de Vercel (`https://lumcards.vercel.app`) y GitHub.
+- Ninguno para esta tarea. Cambios desplegados y activos en la web.
 
 ## Bloqueos y procesos
 
@@ -51,4 +59,4 @@ tags: [lumcards, tarea, despliegue]
 
 ## Cierre
 
-- En curso.
+- Tarea concluida con éxito, reflejada en GitHub y publicada en Vercel en producción.

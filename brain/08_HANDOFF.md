@@ -7,22 +7,24 @@ updated: 2026-09-18
 
 ## Control
 - Agente: Antigravity.
-- Actualizado: 2026-09-18T00:54:00-05:00.
+- Actualizado: 2026-09-18T01:12:00-05:00.
 - Estado: hecha.
-- Tarea: [[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]].
-- Entorno: D:\CODEX, main/base cfd9fb6. Cambios ajenos y código de Codex preservados. Sin commit/push en este cierre.
+- Tarea: [[tasks/2026-09-18-0105-antigravity-subir-cambios-web-vercel-github]].
+- Entorno: D:\CODEX, main rama, commit `2ca8ba3` sincronizado con `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`). Desplegado en vivo en `https://lumcards.vercel.app`.
 
 ## Hecho
+- **Publicación y despliegue web completados ([[tasks/2026-09-18-0105-antigravity-subir-cambios-web-vercel-github]])**:
+  - Commit `2ca8ba3` subido exitosamente a GitHub (`origin/main`).
+  - Verificado despliegue en producción en Vercel (`https://lumcards.vercel.app` y `https://lumcards.vercel.app/practice`).
+  - Incluye:
+    1. Rediseño integral Studio (Biblioteca y navegación, Estudio y visor de tarjetas, Modales, Explorador de tarjetas y Estadísticas).
+    2. Mejoras de arranque de escritorio (`start.ps1`, `server.py`, `launcher.cs`).
+    3. Coherencia matemática y robustez offline en modo web (`test_web_stats.cjs`).
+    4. Cierre de diseño de juegos de Codex.
+    5. Paridad estricta 0-diff entre `dist/` y `docs/`.
+    6. 4 nuevas suites automatizadas de pruebas en Chromium.
 - **Diagnóstico y resolución de error de arranque en Lumcards.exe ([[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]])**:
-  - Causa raíz: conflicto de puerto en segundo intento de enlace (`WinError 10048`), donde `start.ps1` lanzaba excepción prematuramente al salir el proceso duplicado sin verificar si la primera instancia ya estaba viva y saludable.
-  - Mitigaciones de robustez:
-    1. `server.py`: `valid_host` valida loopback (`127.0.0.1`, `localhost`, `0.0.0.0`) inmediatamente sin conexiones UDP externas a `8.8.8.8`.
-    2. `start.ps1`: antes de arrojar fallo al salir el proceso hijo, efectúa una comprobación de salud de contingencia contra `/api/health`; si el servidor ya está escuchando y sano, sale con código 0.
-    3. `tools/launcher.cs`: antes de lanzar `InvalidOperationException`, consulta `IsHealthyAsync()`; sonda de salud con timeout ampliado a 2500ms.
-    4. Compilación limpia con `tools/build-desktop.ps1 -StageOnly`.
-  - El servidor local actual (PID 23168) está 100% activo, sano y respondiendo con las 3.972 tarjetas intactas. Basta con pulsar "Volver a intentar" en la ventana para acceder inmediatamente.
-- **Etapas 1, 2 y 3 del rediseño Studio concluidas**:
-  - Modales, Explorador de tarjetas, Estadísticas, Estudio y Biblioteca unificados bajo la estética Studio marfil/índigo con 0 desbordamiento horizontal en 5 viewports.
+  - Mitigaciones aplicadas y servidor local PID 23168 sano y activo con 3.972 tarjetas intactas.
 
 ## Validación
 - `curl.exe http://127.0.0.1:8765/api/health`: 200 OK (`app: lumcards`, `ok: true`).
