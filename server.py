@@ -49,6 +49,8 @@ class Handler(BaseHTTPRequestHandler):
         host_header = self.headers.get('Host', '').split(':')[0]
         if host_header in {'127.0.0.1', 'localhost', '0.0.0.0'}:
             return True
+        if host_header.endswith('.onrender.com') or os.environ.get('RENDER'):
+            return True
         local_ip = self.engine.get_local_ip()
         return host_header == local_ip
 
@@ -353,7 +355,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description='Lumcards — app personal local')
     parser.add_argument('--host', default='0.0.0.0')
-    parser.add_argument('--port', type=int, default=8765)
+    default_port = int(os.environ.get('PORT', 8765))
+    parser.add_argument('--port', type=int, default=default_port)
     parser.add_argument('--data-dir', default=str(ROOT / 'data'))
     args = parser.parse_args()
     # Bind before opening the collection; a second launch cannot touch its DB.
