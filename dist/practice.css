@@ -1083,12 +1083,13 @@ body {
 }
 
 .play-import {
+  min-width: 0;
   max-width: 1120px;
   width: 100%;
   padding: 32px;
   background: var(--panel, #ffffff);
   border: 1px solid var(--line, #e2e8f0);
-  border-radius: 24px;
+  border-radius: 18px;
 }
 .play-import textarea {
   width: 100%;
@@ -1108,7 +1109,7 @@ body {
   align-items: flex-end;
 }
 .play-import-settings .field {
-  min-width: 200px;
+  min-width: min(200px, 100%);
   flex: 1;
 }
 .play-import-settings .play-check {
@@ -1137,7 +1138,6 @@ body {
   border: 1px solid var(--line, #e2e8f0);
   border-radius: 16px;
   padding: 16px;
-  overflow-x: auto;
 }
 .import-preview-table-col h3 {
   font-size: 15px;
@@ -1190,7 +1190,7 @@ body {
   align-items: center;
 }
 .import-card-body {
-  min-height: 220px;
+  min-height: 320px;
   background: var(--panel, #ffffff);
   border: 1.5px solid var(--line, #e2e8f0);
   border-radius: 14px;
@@ -1937,3 +1937,14 @@ body.practice-studio { --studio-sidebar: 212px; background: var(--bg); font-fami
 
 /* Keep study feedback calm; celebrate only a completed session. */
 .practice-studio .play-streak-badge, .practice-studio .play-answer.incorrect, .practice-studio .match-grid-tile.wrong { animation: none; }
+/* Importer-only Studio alignment; practice game surfaces are unchanged. */
+.practice-studio .play-import h1{font-family:Georgia,serif;font-weight:500;font-size:clamp(26px,3vw,34px);line-height:1.2}
+.practice-studio .play-import :is(select,input,textarea){min-width:0;max-width:100%;min-height:44px}
+.practice-studio .play-import :is(.btn,[role=button]){min-height:44px;white-space:normal}
+.practice-studio .play-import .play-import-actions{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.practice-studio .play-import .import-card-badge{color:var(--text);background:var(--soft)}
+.practice-studio .play-import .import-preview-table-wrapper table{table-layout:fixed;width:100%;overflow-wrap:anywhere}
+.practice-studio .play-import .import-preview-table-wrapper th:first-child{width:32px}
+.practice-studio .play-import .import-card-interactive{padding:24px}
+@media(max-width:1100px){.practice-studio .play-import .import-split-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:540px){.practice-studio .play-import{padding:20px 16px}.practice-studio .play-import .import-card-interactive{padding:16px}.practice-studio .play-import .import-card-body{padding:16px}.practice-studio .play-import .play-import-settings{padding:16px}}

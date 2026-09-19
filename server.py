@@ -62,7 +62,7 @@ class Handler(BaseHTTPRequestHandler):
         if media:
             self.send_header('Access-Control-Allow-Origin', '*')
         else:
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com; media-src 'self' data:; font-src 'self' data:; frame-src 'self' https://accounts.google.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
         if attachment:
             self.send_header('Content-Disposition', f'attachment; filename="{attachment}"')
         self.end_headers()
@@ -158,7 +158,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not path.is_relative_to(vendor):
                     raise ValueError('Archivo de aplicación no válido.')
                 self.file(path)
-            elif route in ('/', '/index.html', '/app.js', '/card-runtime.js', '/app.css', '/student.css', '/icon.svg',
+            elif route in ('/', '/index.html', '/app.js', '/client-startup.js', '/card-runtime.js', '/app.css', '/student.css', '/icon.svg',
                            '/practice.html', '/practice.css', '/practice.js', '/study-games.js', '/sync-manager.js'):
                 self.file(ROOT / 'dist' / ('index.html' if route == '/' else route[1:]))
             else:
@@ -331,6 +331,12 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     keep_children = bool(body.get('keepChildren', False))
                     result = self.engine.delete_deck(body.get('id'), keep_children=keep_children)
+            elif route == '/api/decks/reset':
+                self.engine.backup()
+                result = self.engine.reset_deck(body.get('deckId'))
+            elif route == '/api/reset-all':
+                self.engine.backup()
+                result = self.engine.reset_all()
             else:
                 self.json({'error': 'La operación no existe.'}, 404)
                 return

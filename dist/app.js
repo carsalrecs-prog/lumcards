@@ -37,6 +37,7 @@ const paths = {
   expand:'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7',
   shrink:'M9 15v6m0-6H3m6 0l-7 7M15 9V3m0 6h6m-6 0l7-7',
   image:'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2ZM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5Z',
+  undo:'M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-4',
 };
 const icon = (name,cls='') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.layers}"/></svg>`;
 const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -215,11 +216,22 @@ const AudioController = {
 let isWebMode = false;
 const WEB_STORAGE_KEY = 'lumcards_web_data';
 
+function localDayKey(date) {
+  return [date.getFullYear(), String(date.getMonth()+1).padStart(2,'0'), String(date.getDate()).padStart(2,'0')].join('-');
+}
+
 function getWebData() {
-  try {
-    const raw = localStorage.getItem(WEB_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (_) {}
+  let raw;
+  try { raw = localStorage.getItem(WEB_STORAGE_KEY); }
+  catch (_) { throw new Error('No se pudo leer el almacenamiento del navegador. Permite el almacenamiento y vuelve a intentar.'); }
+  if (raw !== null) {
+    let stored;
+    try { stored = JSON.parse(raw); } catch (_) { throw new Error('Los datos guardados no se pueden leer. Se han conservado intactos. No borres los datos del navegador; recupera una copia antes de reemplazarlos.'); }
+    if (!stored || !Array.isArray(stored.decks) || !Array.isArray(stored.cards) || (stored._revlogs !== undefined && !Array.isArray(stored._revlogs))) {
+      throw new Error('El formato de la biblioteca no es válido. Los datos originales se conservan; revisa una copia antes de restaurar.');
+    }
+    return stored;
+  }
   const starterDecks = [
     { id: 1, name: 'Inglés Esencial · Conversación y Viajes', total: 6, new: 2, learn: 1, due: 3, parentName: null },
     { id: 2, name: 'Cultura General y Ciencia', total: 5, new: 2, learn: 0, due: 3, parentName: null }
@@ -253,13 +265,17 @@ function getWebData() {
     _revlogs: starterRevlogs,
     _practice_history: []
   };
-  try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(initial)); } catch(_) {}
+  persistWebData(initial);
   return initial;
 }
 
 let cloudSyncDebounce = null;
+function persistWebData(store) {
+  try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(store)); }
+  catch (_) { throw new Error('No se guardaron los cambios. El almacenamiento del navegador está lleno o bloqueado. Libera espacio o permite el almacenamiento y vuelve a intentar.'); }
+}
 function saveWebData(store) {
-  try { localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(store)); } catch(_) {}
+  persistWebData(store);
   if (window.LumcardsSync?.firebase?.isConnected()) {
     clearTimeout(cloudSyncDebounce);
     cloudSyncDebounce = setTimeout(async () => {
@@ -578,6 +594,56 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
     }
     const key = String(params.get('deckId') || 'all');
     return store.deckConfigs?.[key] || { newPerDay: 20, revPerDay: 200 };
+  }
+  if (route === 'cards/reset' && body) {
+    const c = store.cards.find(x => String(x.id) === String(body.id));
+    if (c) {
+      c.reps = 0;
+      c.lapses = 0;
+      c.interval = 0;
+      c.ease = 2500;
+      c.state = 'new';
+      c.due = 'Nueva';
+      saveWebData(store);
+    }
+    return { success: true };
+  }
+  if (route === 'decks/reset' && body) {
+    const deck = store.decks.find(d => String(d.id) === String(body.deckId));
+    const prefix = deck ? deck.name + '::' : null;
+    const childDeckIds = new Set(
+      store.decks
+        .filter(d => !deck || d.name === deck.name || (prefix && d.name.startsWith(prefix)))
+        .map(d => String(d.id))
+    );
+    let cardsReset = 0;
+    store.cards.forEach(c => {
+      if (childDeckIds.has(String(c.deckId))) {
+        c.reps = 0;
+        c.lapses = 0;
+        c.interval = 0;
+        c.ease = 2500;
+        c.state = 'new';
+        c.due = 'Nueva';
+        cardsReset++;
+      }
+    });
+    saveWebData(store);
+    return { success: true, deckId: body.deckId, cardsReset };
+  }
+  if (route === 'reset-all') {
+    let cardsReset = 0;
+    store.cards.forEach(c => {
+      c.reps = 0;
+      c.lapses = 0;
+      c.interval = 0;
+      c.ease = 2500;
+      c.state = 'new';
+      c.due = 'Nueva';
+      cardsReset++;
+    });
+    saveWebData(store);
+    return { success: true, cardsReset };
   }
   if (route === 'study/block-info') {
     const deckId = params.get('deckId');
@@ -993,34 +1059,28 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
 
     const addedMap = {};
     list.forEach(c => {
-      const dStr = new Date(Number(c.id) || Date.now()).toISOString().slice(0, 10);
+      const created = new Date(Number(c.id));
+      if (!Number.isFinite(Number(c.id)) || Number.isNaN(created.getTime())) return;
+      const dStr = localDayKey(created);
       addedMap[dStr] = (addedMap[dStr] || 0) + 1;
     });
     const sortedDates = Object.keys(addedMap).sort();
     const addedAll = sortedDates.map(date => ({ date, count: addedMap[date] }));
     const addedLast = (days) => {
-      const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const since = localDayKey(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - days));
       return addedAll.filter(x => x.date >= since);
     };
 
     const cardIdSet = new Set(list.map(c => String(c.id)));
-    const allRevlogs = (store._revlogs || []).filter(r => cardIdSet.has(String(r.cid)));
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const todayLogs = allRevlogs.filter(r => new Date(r.id).toISOString().slice(0, 10) === todayStr);
+    const allRevlogs = (store._revlogs || []).filter(r => r && cardIdSet.has(String(r.cid))).map(r => ({...r, id: Number(r.id)})).filter(r => Number.isFinite(r.id) && r.id > 0 && r.id <= Date.now() && !Number.isNaN(new Date(r.id).getTime()));
+    const todayStr = localDayKey(new Date());
+    const todayLogs = allRevlogs.filter(r => localDayKey(new Date(r.id)) === todayStr);
 
     let todayCount = todayLogs.length;
-    let todayTimeSec = todayLogs.reduce((s, r) => s + Math.round((r.time || 5000) / 1000), 0);
+    let todayTimeSec = todayLogs.reduce((s, r) => s + Math.round((Math.max(0, Number(r.time) || 0)) / 1000), 0);
     let todayCorrect = todayLogs.filter(r => r.rating > 1).length;
     let todayReviewCount = todayLogs.filter(r => (r.interval || 0) >= 1).length;
     let todayLearnCount = todayLogs.filter(r => (r.interval || 0) < 1).length;
-
-    if (todayCount === 0 && (!deckId || deckId === 'all') && (store.stats?.reviewedToday || 0) > 0) {
-      todayCount = store.stats.reviewedToday;
-      todayTimeSec = todayCount * 12;
-      todayReviewCount = Math.min(todayCount, 3);
-      todayLearnCount = todayCount - todayReviewCount;
-      todayCorrect = todayCount;
-    }
 
     const ranges = [30, 90, 365];
     const hourly = {};
@@ -1050,20 +1110,16 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
 
     const activityMap = {};
     allRevlogs.forEach(r => {
-      const dt = new Date(r.id).toISOString().slice(0, 10);
+      const dt = localDayKey(new Date(r.id));
       if (!activityMap[dt]) activityMap[dt] = { count: 0, timeSeconds: 0 };
       activityMap[dt].count++;
-      activityMap[dt].timeSeconds += Math.round((r.time || 5000) / 1000);
+      activityMap[dt].timeSeconds += Math.round((Math.max(0, Number(r.time) || 0)) / 1000);
     });
-    if ((store.stats?.reviewedToday || 0) > 0 && todayLogs.length === 0 && (!deckId || deckId === 'all')) {
-      if (!activityMap[todayStr]) activityMap[todayStr] = { count: store.stats.reviewedToday, timeSeconds: store.stats.reviewedToday * 12 };
-    }
-
     const calendarDays = [];
     const yearStart = new Date(targetYear, 0, 1);
     const yearEnd = new Date(targetYear, 11, 31);
     for (let d = new Date(yearStart); d <= yearEnd; d.setDate(d.getDate() + 1)) {
-      const dtStr = d.toISOString().slice(0, 10);
+      const dtStr = localDayKey(d);
       const act = activityMap[dtStr] || { count: 0, timeSeconds: 0 };
       calendarDays.push({
         date: dtStr,
@@ -1078,7 +1134,7 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
       for (let i = days; i >= 0; i--) {
         const cur = new Date();
         cur.setDate(cur.getDate() - i);
-        const dtStr = cur.toISOString().slice(0, 10);
+        const dtStr = localDayKey(cur);
         const act = activityMap[dtStr] || { count: 0, timeSeconds: 0 };
         res.push({
           date: dtStr,
@@ -1273,8 +1329,8 @@ async function api(path,body,method='POST') {
     throw err;
   }
 }
-function toast(message,error=false) { const el=$('#toast'); el.textContent=message; el.className='show'+(error?' error':''); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.className='',error?7000:4000); }
-function loading(value) {busy=value;document.querySelector('.loading-bar')?.remove();if(value){const el=document.createElement('div');el.className='loading-bar';document.body.append(el);} document.querySelectorAll('button[data-mutate], .rating-button').forEach(b=>b.disabled=value);}
+function toast(message,error=false) { const el=$('#toast'); el.textContent=message; el.setAttribute?.('role',error?'alert':'status'); el.className='show'+(error?' error':''); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.className='',error?7000:4000); }
+function loading(value) {busy=value;app.setAttribute?.('aria-busy',String(value));document.querySelector('.loading-bar')?.remove();if(value){const el=document.createElement('div');el.className='loading-bar';el.setAttribute('role','status');el.setAttribute('aria-label','Operación en curso. Espera a que termine.');document.body.append(el);} document.querySelectorAll('button[data-mutate], .rating-button').forEach(b=>b.disabled=value);}
 async function loadCards(offset=0){const version=++browseVersion;const params=new URLSearchParams({query:search,offset:String(offset),limit:'50'});if(selectedDeck)params.set('deckId',selectedDeck);if(view==='favorites')params.set('starred','1');const result=await api('cards?'+params);if(version===browseVersion){browsePage=result;data.cards=result.cards;}return result;}
 async function refresh(renderNow=true){data=await api('state');if(view==='cards'||view==='favorites')await loadCards(browsePage.offset);if(renderNow)render();}
 function button(label,action,ico,cls='',attrs=''){return `<button type="button" class="btn ${cls}" data-action="${action}" ${attrs}>${ico?icon(ico):''}${label}</button>`;}
@@ -1284,21 +1340,22 @@ const palettes=[['#edf0ff','#818ac9','language'],['#e7f5ef','#58a388','globe'],[
 function deckPalette(d,i){const n=d.name.toLowerCase();if(n.includes('ingl'))return palettes[0];if(n.includes('cultura'))return palettes[1];if(n.includes('aprender'))return palettes[2];return palettes[i%palettes.length];}
 function getDue(d){return Number(d.due||0);}
 function getStats(){const s=data.stats;return {...s,totalCards:s.totalCards??data.cards.length,dueToday:s.dueToday??data.decks.reduce((n,d)=>n+getDue(d),0),reviewedToday:s.reviewedToday||0,streak:s.streak||0};}
-function shell(content){const names={decks:'Mis mazos',stats:'Estadísticas',favorites:'Favoritos',sync:'Sincronización',backups:'Copias de seguridad',settings:'Ajustes',cards:'Explorar tarjetas',study:'Repaso'}; const nav=(id,name,ic,extra='')=>`<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}" ${view===id?'aria-current="page"':''}>${icon(ic)}${name}${extra}</button>`;
+function shell(content){const names={decks:'Mis mazos',stats:'Estadísticas',favorites:'Favoritos',sync:'Sincronización',backups:'Copias de seguridad',settings:'Ajustes',cards:'Explorar tarjetas',study:'Repaso',admin:'Administración'}; const nav=(id,name,ic,extra='')=>`<button class="nav-item ${view===id?'active':''}" data-action="nav" data-view="${id}" ${view===id?'aria-current="page"':''}>${icon(ic)}${name}${extra}</button>`;
 const fbUser = window.LumcardsSync?.firebase?.getUser();
+const isAdminUser = Boolean(window.LumcardsSync?.firebase?.isAdmin?.());
 const userInitial = fbUser ? esc((fbUser.name || fbUser.email || 'G')[0].toUpperCase()) : 'L';
 const avatarHtml = fbUser?.photoURL ? `<img src="${esc(fbUser.photoURL)}" class="avatar" style="width:32px;height:32px;border-radius:50%;object-fit:cover" alt="Google Avatar">` : `<div class="avatar">${userInitial}</div>`;
 const userTitle = fbUser ? esc(fbUser.name || fbUser.email.split('@')[0]) : 'Mi espacio personal';
-const userSubtitle = fbUser ? (fbUser.isLocalSession ? 'Modo local' : '● Sincronizado en Google') : 'Guardado en este equipo';
+const userSubtitle = !navigator.onLine ? 'Sin conexión' : fbUser && !fbUser.isLocalSession ? 'Cuenta conectada' : 'Modo local';
 return `<div class="app-layout">
 <aside class="sidebar" id="sidebar" aria-label="Navegación principal">
 <div class="brand"><div class="brand-mark">L<span>✦</span></div><div><div class="brand-name">Lumcards</div><div class="brand-caption">Aprende a tu ritmo</div></div><button class="icon-button sidebar-close" data-action="close-menu" aria-label="Cerrar menú">${icon('close')}</button></div>
 <div class="nav-label">TU ESTUDIO</div><nav class="nav">${nav('decks','Mi biblioteca','layers',`<span class="badge">${data.decks.length}</span>`)}${nav('cards','Tarjetas','search')}<a class="nav-item" href="/practice.html">${icon('spark')}Jugar y aprender</a>${nav('stats','Mi progreso','chart')}${nav('favorites','Favoritos','star')}</nav>
-<details class="workspace-options" ${['sync','backups','settings'].includes(view)?'open':''}><summary>Mi espacio ${icon('chevron')}</summary><nav class="nav">${nav('sync','Sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}</nav></details>
+<details class="workspace-options" ${['sync','backups','settings','admin'].includes(view)?'open':''}><summary>Mi espacio ${icon('chevron')}</summary><nav class="nav">${nav('sync','Cuenta y sincronización','cloud')}${nav('backups','Copias de seguridad','archive')}${nav('settings','Ajustes','settings')}${isAdminUser?nav('admin','Administración','shield'):''}</nav></details>
 <div class="sidebar-bottom"><p class="sidebar-note">Un poco, todos los días.</p><button type="button" class="profile" data-action="nav" data-view="sync" aria-label="Cuenta y sincronización">${avatarHtml}<span class="profile-copy"><strong>${userTitle}</strong><span>${userSubtitle}</span></span>${icon(fbUser ? 'cloud' : 'shield')}</button></div>
 </aside><button class="nav-scrim" data-action="close-menu" tabindex="-1" aria-label="Cerrar navegación"></button>
 <div class="workspace"><header class="topbar"><button class="icon-button mobile-toggle" data-action="menu" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false">${icon('menu')}</button><div class="breadcrumb"><strong>${names[view]||'Mi biblioteca'}</strong></div><div class="top-tools"><label class="search">${icon('search')}<input id="global-search" type="search" placeholder="Buscar tarjetas o mazos" aria-label="Buscar en tu biblioteca" value="${esc(search)}"><kbd>Ctrl K</kbd></label><button class="icon-button" data-action="theme" aria-label="${theme==='dark'?'Activar tema claro':'Activar tema oscuro'}">${icon(theme==='dark'?'sun':'moon')}</button><button class="icon-button" data-action="help" aria-label="Ayuda y atajos">${icon('help')}</button></div></header>
-<main class="main view-${view}" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('shield')}${fbUser && !fbUser.isLocalSession ? 'Cuenta conectada' : 'Guardado en este equipo'}</span><span>A tu ritmo, cada día.</span></footer></main></div></div>`;}
+<main class="main view-${view}" id="main" tabindex="-1">${content}<footer class="footer"><span class="saved-state">${icon('shield')}<span data-connection-status>${!navigator.onLine?'Sin conexión':fbUser && !fbUser.isLocalSession?'Cuenta conectada':isWebMode?'Biblioteca en este navegador':'Biblioteca local'}</span></span><span>A tu ritmo, cada día.</span></footer></main></div></div>`;}
 
 
 function studyTools(){
@@ -1448,6 +1505,7 @@ function deckCard(d,i,isPreview=false){
 ${!isFolder ? button('Plan de estudio','deck-config','settings','',`data-id="${d.id}"`) + button('Mover a carpeta','move-deck-modal','folder','',`data-id="${d.id}"`) : ''}
 ${button('Renombrar '+(isFolder?'carpeta':'mazo'),'rename-deck','edit','',`data-id="${d.id}"`)}
 ${button('Abrir '+(isFolder?'carpeta':'mazo'),isFolder?'open-folder':'open-deck','chevron','',`data-id="${d.id}"`)}
+${!isFolder ? `<button type="button" class="btn-menu" data-action="reset-deck-prompt" data-id="${d.id}" data-name="${esc(displayName)}">${icon('undo')} Reiniciar progreso del mazo</button>` : ''}
 <button type="button" class="btn-menu text-danger" data-action="delete-deck-prompt" data-id="${d.id}">${icon('trash')} Eliminar ${isFolder?'carpeta':'mazo'}</button>
 </div></details>
   `;
@@ -1536,6 +1594,7 @@ function cardsView(favorites=false){
     ${button('Renombrar mazo','rename-deck','edit','',`data-id="${selectedDeck}"`)}
     ${button('Mover a carpeta','move-deck-modal','folder','',`data-id="${selectedDeck}"`)}
     ${button('Exportar mazo .apkg','export-deck','download','',`data-id="${selectedDeck}"`)}
+    ${button('Reiniciar progreso del mazo','reset-deck-prompt','undo','btn-quiet',`data-id="${selectedDeck}" data-name="${esc(deck?deck.name:'')}"`)}
     ${button('Eliminar mazo','delete-deck-prompt','trash','btn-quiet text-danger',`data-id="${selectedDeck}"`)}
   </div>`:''}
   
@@ -1603,12 +1662,18 @@ function cardsView(favorites=false){
     </div>
   </div>`;
 }
+let detailedStatsError = '', detailedStatsLoading = false;
 async function loadDetailedStats(deckId=statsDeck, year=statsCalendarYear){
+  if(detailedStatsLoading)return;
+  detailedStatsLoading = true; detailedStatsError = ''; detailedStats = null;
+  statsDeck = deckId || 'all'; statsCalendarYear = year ? Number(year) : new Date().getFullYear();
   const params=new URLSearchParams();
   if(deckId && deckId!=='all') params.set('deckId', deckId);
   if(year) params.set('year', String(year));
   try {
-    detailedStats = await api('stats/detailed?' + params, undefined, 'GET');
+    const result = await api('stats/detailed?' + params, undefined, 'GET');
+    if(!result?.today || !result?.forecast || !result?.history || !result?.calendar || !result?.cardBreakdown || !Array.isArray(result.calendar.days) || ![30,90,365].every(days => Array.isArray(result.forecast['days'+days]) && Array.isArray(result.history['days'+days])))throw new Error('La respuesta de estadísticas no es válida. Vuelve a intentar.');
+    detailedStats = result;
     try {
       const weakRes = await api('cards/weak?' + (deckId && deckId!=='all' ? 'deckId='+deckId : ''), undefined, 'GET');
       detailedStats.weakCards = weakRes.cards || [];
@@ -1616,8 +1681,9 @@ async function loadDetailedStats(deckId=statsDeck, year=statsCalendarYear){
     statsDeck = deckId || 'all';
     statsCalendarYear = year ? Number(year) : new Date().getFullYear();
   } catch(e) {
+    detailedStats = null; detailedStatsError = e.message;
     toast(e.message, true);
-  }
+  } finally { detailedStatsLoading = false; }
 }
 
 function renderSvgBarChart(items, valKey, labelKey, barColor='#22c55e', showCumul=false){
@@ -1715,7 +1781,7 @@ function renderCalendarHeatmap(calendar){
   const weekdays = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
   const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
   
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localDayKey(new Date());
   const activeDay = days.find(d => d.date === todayIso) || days.slice().reverse().find(d => d.count > 0) || days[days.length - 1];
   const initialDateStr = formatFullSpanishDate(activeDay.date);
   const initialLabel = `${initialDateStr} · ${activeDay.count > 0 ? num(activeDay.count) + ' repasos (' + Math.round(activeDay.timeSeconds/60) + ' min)' : 'Sin repasos registrados'}`;
@@ -1893,8 +1959,9 @@ function renderAddedChart(addedData) {
 }
 
 function statistics(){
+  if(detailedStatsError)return `${heading('Estadísticas','No se pudieron cargar los datos.')}<section class="panel error-panel" role="alert"><p>${esc(detailedStatsError)}</p>${button('Volver a intentar','retry-stats','refresh')}</section>`;
   if(!detailedStats) {
-    loadDetailedStats().then(render);
+    if(!detailedStatsLoading)loadDetailedStats().then(render);
     return `${heading('Estadísticas','Analizando tu ritmo de estudio…')}<div class="empty">${icon('chart')}<h3>Cargando tus estadísticas…</h3><p>Calculando repasos, pronósticos y retención.</p></div>`;
   }
 
@@ -2117,7 +2184,7 @@ function statistics(){
           <div class="stats-chart-wrapper">
             ${renderSvgBarChart(s.intervals.distribution, 'count', 'interval', '#3b82f6')}
           </div>
-          <div class="stats-metric-grid" style="grid-template-columns:1fr 1fr">
+          <div class="stats-metric-grid">
             <div class="stats-metric-box">
               <div class="metric-num">${s.intervals.avgInterval}d</div>
               <div class="metric-label">Intervalo promedio</div>
@@ -2143,7 +2210,7 @@ function statistics(){
           <div class="stats-chart-wrapper">
             ${renderSvgBarChart(s.ease.distribution, 'count', 'factor', '#a855f7')}
           </div>
-          <div class="stats-metric-grid" style="grid-template-columns:1fr 1fr">
+          <div class="stats-metric-grid">
             <div class="stats-metric-box">
               <div class="metric-num">${s.ease.avgEase}%</div>
               <div class="metric-label">Facilidad media</div>
@@ -2203,7 +2270,7 @@ function statistics(){
           </tbody>
         </table>
       </div>
-      <div class="stats-metric-grid" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stats-metric-grid">
         <div class="stats-metric-box">
           <div class="metric-num" style="color:#16a34a">${s.retention.young.rate != null ? s.retention.young.rate + '%' : '—'}</div>
           <div class="metric-label">Jóvenes (intervalo &lt; 21d)</div>
@@ -2309,228 +2376,162 @@ function statistics(){
   </div>`;
 }
 function localDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
-function backupsView(){return `${heading('Tu aprendizaje, a buen recaudo.','Copias de tu colección con tarjetas, archivos multimedia y progreso.',button('Crear copia ahora','backup','archive','btn-primary','data-mutate'))}<div class="two-col"><section class="panel"><h2>Copias guardadas en este equipo</h2><p>Se crea una copia al iniciar la app y antes de importar archivos.</p>${backupList.length?backupList.map(b=>`<div class="backup-row">${icon('archive')}<div><strong>${esc(b.name)}</strong><small>${esc(b.date||'')} · ${num(Math.ceil((b.size||0)/1024))} KB</small></div><a class="btn" href="/api/backups/${encodeURIComponent(b.name)}" download aria-label="Descargar ${esc(b.name)}">${icon('download')}</a></div>`).join(''):'<p class="info-box">Crea tu primera copia para llevarte tu biblioteca a otro lugar.</p>'}</section><section class="panel"><span class="stat-icon">${icon('shield')}</span><h2 class="mt">Una copia también puede viajar.</h2><p>Descarga tu colección como <strong>.colpkg</strong> y guárdala en un disco externo o llévatela a otro equipo.</p><a class="btn" href="/api/export" download>${icon('download')}Exportar colección</a><p class="small">Para añadir el contenido de una copia a tu biblioteca, impórtala. Las notas se combinan; no se reemplaza toda la colección.</p>${button('Importar una copia','import','upload','btn-quiet')}</section></div>`;}
-function settingsView(){return `${heading('Hazlo a tu manera.','Pequeños ajustes para tu rutina de aprendizaje.')}<div class="two-col"><section class="panel"><h2>Tu experiencia</h2><form id="settings-form"><div class="settings-row"><div><strong>Meta diaria</strong><p>Número de repasos que quieres completar al día.</p></div><input id="daily-goal" aria-label="Meta diaria de repasos" type="number" min="1" max="1000" value="${data.settings.dailyGoal||20}" required></div><div class="settings-row"><div><strong>Apariencia</strong><p>Elige el ambiente que te ayude a concentrarte.</p></div>${button(theme==='dark'?'Oscuro':'Claro','theme',theme==='dark'?'moon':'sun')}</div><div class="settings-row"><div><strong>Diseño de Tarjetas</strong><p>Personaliza el estilo visual, tipografía y colores.</p></div>${button('Personalizar estilo','open-templates','edit')}</div><div class="form-footer"><button class="btn btn-primary" data-mutate>Guardar ajustes</button></div></form></section><section class="panel"><h2>Tu biblioteca es tuya.</h2><p>Las tarjetas y los repasos se guardan automáticamente en este equipo. Puedes cerrar la pestaña y continuar cuando quieras.</p><p class="info-box">Carpeta de datos: <strong>${esc(data.storage?.dataDir||'data')}</strong><br>Los datos no dependen de la memoria del navegador.</p><p class="small">Lumcards es una aplicación personal e independiente de aprendizaje y práctica con tarjetas.</p>${button('Ayuda y atajos','help','help')}</section></div>`;}
+function backupsView(){return `<div class="workspace-page">${workspaceLinks()}${heading('Copias que puedes conservar.','Copias de tu colección con tarjetas, archivos multimedia y progreso.',button('Crear copia ahora','backup','archive','btn-primary','data-mutate'))}<div class="two-col"><section class="panel"><h2>Copias guardadas en este equipo</h2><p>${isWebMode?'En la web, el registro de una copia no garantiza un archivo recuperable. La recuperación de copias web está pendiente de validación.':'El escritorio crea copias al iniciar y antes de importar. Descarga una copia para conservarla fuera del equipo.'}</p>${backupList.length?backupList.map(b=>`<div class="backup-row">${icon('archive')}<div><strong>${esc(b.name)}</strong><small>${esc(b.date||'')} · ${num(Math.ceil((b.size||0)/1024))} KB</small></div><a class="btn" href="/api/backups/${encodeURIComponent(b.name)}" download aria-label="Descargar ${esc(b.name)}">${icon('download')}</a></div>`).join(''):'<p class="info-box">Crea tu primera copia para llevarte tu biblioteca a otro lugar.</p>'}</section><section class="panel"><span class="stat-icon">${icon('shield')}</span><h2 class="mt">Una copia también puede viajar.</h2><p>Descarga tu colección como <strong>.colpkg</strong> y guárdala en un disco externo o llévatela a otro equipo.</p><a class="btn" href="/api/export" download>${icon('download')}Exportar colección</a><p class="small">Para añadir el contenido de una copia a tu biblioteca, impórtala. Las notas se combinan; no se reemplaza toda la colección.</p>${button('Importar una copia','import','upload','btn-quiet')}</section></div></div>`;}
+function settingsView(){return `<div class="workspace-page">${workspaceLinks()}${heading('Hazlo a tu manera.','Pequeños ajustes para tu rutina de aprendizaje.')}<div class="two-col"><section class="panel"><h2>Tu experiencia</h2><form id="settings-form"><div class="settings-row"><div><strong>Meta diaria</strong><p>Número de repasos que quieres completar al día.</p></div><input id="daily-goal" aria-label="Meta diaria de repasos" type="number" min="1" max="1000" value="${data.settings.dailyGoal||20}" required></div><div class="settings-row"><div><strong>Apariencia</strong><p>Elige el ambiente que te ayude a concentrarte.</p></div>${button(theme==='dark'?'Oscuro':'Claro','theme',theme==='dark'?'moon':'sun')}</div><div class="settings-row"><div><strong>Diseño de Tarjetas</strong><p>Personaliza el estilo visual, tipografía y colores.</p></div>${button('Personalizar estilo','open-templates','edit')}</div><div class="form-footer"><button class="btn btn-primary" data-mutate>Guardar ajustes</button></div></form></section><section class="panel"><h2>Tu biblioteca es tuya.</h2><p>${isWebMode?'Esta versión usa almacenamiento del navegador. Borrar los datos del sitio o usar una sesión privada puede hacerte perder la biblioteca local.':'La aplicación de escritorio almacena tu biblioteca en el equipo. Conserva copias fuera del dispositivo antes de borrar o trasladar archivos.'}</p><p class="info-box">${isWebMode?'Almacenamiento: este navegador. Una cuenta conectada no confirma que tu biblioteca esté sincronizada.':`Carpeta de datos: <strong>${esc(data.storage?.dataDir||'data')}</strong><br>Consulta Copias y transferencias para conservar un archivo fuera del equipo.`}</p><p class="small">Importar, borrar y restaurar pueden afectar a tu biblioteca. Lee la confirmación de cada operación antes de continuar.</p>${button('Ayuda y atajos','help','help')}<div class="settings-row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:16px"><div><strong>Zona de riesgo</strong><p>Reinicia el progreso de TODA la colección. Todas las tarjetas vuelven a estado "nueva". Revisa la confirmación y las opciones de recuperación antes de continuar.</p></div>${button('Reiniciar toda la colección','reset-all-prompt','undo','btn-quiet text-danger')}</div></section></div></div>`;}
 
-let syncInfo = null;
+let syncInfo = null, syncInfoError = '';
 async function loadSyncInfo(){
   try {
+    syncInfoError = '';
     syncInfo = await api('sync/info', undefined, 'GET');
   } catch(e) {
+    syncInfo = null; syncInfoError = e.message;
     console.warn('Sync info error:', e);
   }
 }
 
+let accessInfo = null;
+async function loadAccessInfo(){
+  try {
+    accessInfo = window.LumcardsSync?.firebase?.getUser() ? await window.LumcardsSync.firebase.checkAccess() : null;
+  } catch (e) {
+    accessInfo = null;
+    console.warn('Access info error:', e);
+  }
+}
+
+// Presentation-only state: authentication is not proof that a transfer completed.
+const workspaceTransfers = { firebase: { state: 'idle' }, drive: { state: 'idle' } };
+function workspaceStatus(service = 'firebase') {
+  const user = window.LumcardsSync?.[service]?.getUser();
+  const transfer = workspaceTransfers[service];
+  if (!navigator.onLine) return { state:'offline', label:'Sin conexión', detail:'Puedes seguir trabajando con el contenido disponible. Conecta a internet antes de transferir.' };
+  if (transfer.state === 'syncing') return { state:'syncing', label:'Sincronizando', detail:'Transferencia en curso. Mantén esta ventana abierta.' };
+  if (transfer.state === 'error') return { state:'error', label:'Error de transferencia', detail:transfer.message || 'No se confirmó la transferencia. Revisa tu conexión y vuelve a intentarlo.' };
+  if (!user || user.isLocalSession) return { state:'local', label:'Modo local', detail:'No hay una cuenta en la nube conectada. Inicia sesión para transferir tu contenido.' };
+  if (transfer.state === 'synced') return { state:'synced', label:'Sincronizado', detail:'Última transferencia confirmada en esta sesión. Los cambios posteriores pueden estar pendientes.' };
+  return { state:'connected', label:'Cuenta conectada', detail:'La sesión está iniciada. Todavía no se ha confirmado una transferencia en esta sesión.' };
+}
+function workspaceStatusMarkup(service) {
+  const status = workspaceStatus(service);
+  return `<div class="workspace-status" data-service="${service}" data-state="${status.state}" role="status"><strong>${icon(status.state==='error'?'help':status.state==='synced'?'check':'cloud')}${status.label}</strong><p>${esc(status.detail)}</p></div>`;
+}
+function setWorkspaceTransfer(service, state, message='') {
+  workspaceTransfers[service] = {state,message};
+  document.querySelectorAll(`.workspace-status[data-service="${service}"]`).forEach(el=>{el.outerHTML=workspaceStatusMarkup(service);});
+}
+function workspaceLinks() {
+  return `<nav class="workspace-links" aria-label="Mi espacio">${[['sync','Cuenta y sincronización'],['backups','Copias y transferencias'],['settings','Preferencias']].map(([id,label])=>button(label,'nav',null,view===id?'workspace-link-current':'',`data-view="${id}" ${view===id?'aria-current="page"':''}`)).join('')}</nav>`;
+}
 function syncView(){
-  const s = syncInfo || { localIp: '...', port: 8765, url: 'http://...', totalCards: data.cards?.length||0, totalDecks: data.decks?.length||0 };
-  const lastP2p = s.lastP2P ? `${formatFullSpanishDate(s.lastP2P.iso.slice(0, 10))} · ${s.lastP2P.added || 0} tarjetas añadidas de ${esc(s.lastP2P.peer)}` : 'Ninguna sincronización P2P reciente';
-  const lastExport = s.lastExport ? `${formatFullSpanishDate(s.lastExport.iso.slice(0, 10))} · ${s.lastExport.filename} (${Math.round((s.lastExport.sizeBytes||0)/1024)} KB)` : 'Aún no has exportado ningún paquete';
-
-  const syncMgr = window.LumcardsSync;
-  const fbUser = syncMgr?.firebase?.getUser();
-  const driveUser = syncMgr?.drive?.getUser();
-  const chosenDest = syncMgr?.getStorageDestination ? syncMgr.getStorageDestination() : (localStorage.getItem('lumcards_storage_destination') || 'device');
-
-  return `
-  <div class="sync-container">
-    <div class="sync-hero">
-      <div class="sync-hero-content">
-        <div class="sync-hero-kicker">${icon('cloud')} Sincronización Tri-Storage · Nube, Drive y Local</div>
-        <h1 class="sync-hero-title">Tus tarjetas siempre contigo en Web, Android y PC</h1>
-        <p class="sync-hero-desc">Sincroniza tus repasos en tiempo real con la nube de Firebase, guarda tus libros y fotos en los 15 GB gratuitos de tu propio Google Drive, y mantén siempre una copia offline en tu dispositivo sin costos ocultos.</p>
-      </div>
-      <div class="sync-hero-badge">
-        <strong>${num(s.totalCards || data.counts?.totalCards || data.cards.length)}</strong>
-        <span>Tarjetas listas</span>
-      </div>
+  const s = syncInfo;
+  const mgr = window.LumcardsSync;
+  const fbUser = mgr?.firebase?.getUser(), driveUser = mgr?.drive?.getUser();
+  const dest = mgr?.getStorageDestination?.() || localStorage.getItem('lumcards_storage_destination') || 'device';
+  const account = (user, fallback) => `<p class="workspace-identity"><strong>${esc(user?.name || user?.email || fallback)}</strong>${user?.email?`<span>${esc(user.email)}</span>`:''}</p>`;
+  return `<div class="workspace-page">${heading('Tu espacio, a tu manera.','Cuenta, preferencias y transferencias, en un solo lugar.')}${workspaceLinks()}
+    <div class="workspace-grid">
+      <section class="panel workspace-card"><span class="eyebrow">Cuenta</span><h2>Tu progreso entre dispositivos</h2><p>Conecta tu cuenta para solicitar una transferencia a la nube.</p>
+        ${account(fbUser,'Sin sesión iniciada')}${workspaceStatusMarkup('firebase')}
+        <div class="workspace-actions">${fbUser?button('Sincronizar ahora','firebase-sync-now','cloud','btn-primary')+button('Cerrar sesión','firebase-logout'):button('Iniciar sesión o registrarme','firebase-login-modal','cloud','btn-primary')}</div>
+      </section>
+      ${accessStatusCard()}
+      <section class="panel workspace-card"><span class="eyebrow">Copias externas</span><h2>Tus archivos en Google Drive</h2><p>Conecta Drive para transferir paquetes de tu biblioteca. La capacidad depende de tu cuenta de Google.</p>
+        ${account(driveUser,'Drive sin vincular')}${workspaceStatusMarkup('drive')}
+        <div class="workspace-actions">${driveUser?button('Subir una copia','drive-backup-now','upload','btn-primary')+button('Ver mis copias','drive-list-modal','download')+button('Desconectar','drive-disconnect'):button('Conectar Google Drive','drive-connect','archive','btn-primary')}</div>
+      </section>
     </div>
-
-    <!-- SELECTOR DE DESTINO PREFERIDO DE ALMACENAMIENTO -->
-    <section class="sync-card" style="margin-bottom: 24px; border: 2px solid var(--primary, #6366f1); background: var(--panel);">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
-        <span style="font-size:26px">📍</span>
-        <div>
-          <h2 style="font-size:18px;margin:0;font-weight:800;color:var(--text)">¿Dónde prefieres guardar tu estudio y tus libros?</h2>
-          <p style="margin:3px 0 0;font-size:13px;color:var(--muted)">Tú tienes el control total. Elige tu destino predeterminado con un solo clic:</p>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px">
-        <div class="storage-choice-card ${chosenDest === 'device' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="device">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:24px">📱</span>
-            <span class="badge ${chosenDest === 'device' ? 'badge-active' : ''}">${chosenDest === 'device' ? '✓ Activo' : 'Elegir'}</span>
-          </div>
-          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">En este Dispositivo</strong>
-          <p style="font-size:12px;color:var(--muted);margin:0">100% Privado y Offline. No requiere cuentas ni internet. Se guarda en la memoria interna de tu equipo.</p>
-        </div>
-
-        <div class="storage-choice-card ${chosenDest === 'firebase' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="firebase">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:24px">☁️</span>
-            <span class="badge ${chosenDest === 'firebase' ? 'badge-active' : ''}">${chosenDest === 'firebase' ? '✓ Activo' : 'Elegir'}</span>
-          </div>
-          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Nube Lumcards</strong>
-          <p style="font-size:12px;color:var(--muted);margin:0">Sincronización instantánea con tu correo. Mantiene tus rachas, repasos y metas al día en todos tus dispositivos.</p>
-        </div>
-
-        <div class="storage-choice-card ${chosenDest === 'gdrive' ? 'active-storage' : ''}" data-action="set-storage-dest" data-dest="gdrive">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:24px">📁</span>
-            <span class="badge ${chosenDest === 'gdrive' ? 'badge-active' : ''}">${chosenDest === 'gdrive' ? '✓ Activo' : 'Elegir'}</span>
-          </div>
-          <strong style="font-size:15px;display:block;margin:6px 0 2px;color:var(--text)">Tu Google Drive</strong>
-          <p style="font-size:12px;color:var(--muted);margin:0">Tus 15 GB gratuitos de Google para libros grandes, fotos HD y audios. Sin depender de servidores de terceros.</p>
-        </div>
-      </div>
+    <section class="panel workspace-card"><span class="eyebrow">Preferencia de almacenamiento</span><h2>Elige un destino habitual</h2><p>Esta preferencia no confirma una copia ni mueve los datos existentes. Revisa el estado de cada transferencia.</p>
+      <div class="workspace-destinations" role="group" aria-label="Destino preferido">${[['device','Este dispositivo','Contenido local disponible en este navegador o equipo.'],['firebase','Nube Lumcards','Requiere una cuenta conectada y conexión a internet.'],['gdrive','Google Drive','Paquetes de respaldo en tu cuenta de Google.']].map(([id,title,desc])=>`<button type="button" class="storage-choice-card ${dest===id?'active-storage':''}" data-action="set-storage-dest" data-dest="${id}" aria-pressed="${dest===id}"><strong>${title}</strong><span>${desc}</span><span class="workspace-choice-label">${dest===id?'✓ Preferido':'Elegir destino'}</span></button>`).join('')}</div>
     </section>
-
-    <div class="sync-sovereign-banner">
-      ${icon('shield')}
-      <div><strong>Arquitectura Soberana Multiplataforma:</strong> Tus datos te pertenecen. Los repasos se sincronizan al instante vía Firebase, mientras que los mazos grandes se almacenan en tu propio Google Drive o en la memoria interna de tu teléfono/PC. Cero costos de servidor para siempre.</div>
-    </div>
-
-    <div class="sync-grid">
-      <!-- COLUMNA 1: NUBE FIREBASE & GOOGLE DRIVE -->
-      <div style="display:flex;flex-direction:column;gap:24px">
-        <!-- 1. NUBE LUMCARDS (FIREBASE SYNC) -->
-        <section class="sync-card">
-          <div class="sync-card-header">
-            <div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                <span class="badge" style="background:rgba(99,102,241,0.15);color:var(--primary,#6366f1);font-weight:700">FIREBASE CLOUD</span>
-                <span class="small muted">Repasos y Rachas en Vivo</span>
-              </div>
-              <h2 class="sync-card-title">${icon('cloud')} Cuenta en la Nube (Firebase)</h2>
-              <p class="sync-card-desc">Sincroniza tus sesiones de estudio, rachas diarias, estadísticas y preferencias entre tu celular, laptop y navegador.</p>
-            </div>
-          </div>
-
-          <div style="background:var(--bg);padding:14px;border-radius:12px;border:1px solid var(--line);margin:14px 0">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div>
-                <strong style="font-size:14px;display:block">${fbUser ? esc(fbUser.name || fbUser.email) : 'Modo Invitado Local'}</strong>
-                <span class="small muted">${fbUser ? 'Sesión iniciada con ' + esc(fbUser.email) : 'Inicia sesión para sincronizar automáticamente con otros dispositivos'}</span>
-              </div>
-              <span class="badge" style="${fbUser ? 'background:rgba(16,185,129,0.15);color:#10b981' : 'background:rgba(100,116,139,0.15);color:#64748b'}">
-                ${fbUser ? '● En línea' : '○ Modo local'}
-              </span>
-            </div>
-          </div>
-
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            ${fbUser ? `
-              <button class="btn btn-primary" data-action="firebase-sync-now">${icon('cloud')} Sincronizar mi progreso ahora</button>
-              <button class="btn btn-quiet" data-action="firebase-logout">Cerrar sesión</button>
-            ` : `
-              <button class="btn btn-primary" data-action="firebase-login-modal">${icon('plus')} Iniciar sesión / Registrarme</button>
-            `}
-          </div>
-        </section>
-
-        <!-- 2. ALMACENAMIENTO DE MAZOS EN GOOGLE DRIVE PERSONAL -->
-        <section class="sync-card">
-          <div class="sync-card-header">
-            <div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                <span class="badge" style="background:rgba(245,158,11,0.15);color:#d97706;font-weight:700">GOOGLE DRIVE</span>
-                <span class="small muted">15 GB Gratis para Mazos y Fotos</span>
-              </div>
-              <h2 class="sync-card-title">${icon('archive')} Almacenamiento en tu Google Drive</h2>
-              <p class="sync-card-desc">Tus libros con fotos de alta resolución y grabaciones de audio se guardan en tu propia cuenta de Google Drive sin ocupar servidores externos.</p>
-            </div>
-          </div>
-
-          <div style="background:var(--bg);padding:14px;border-radius:12px;border:1px solid var(--line);margin:14px 0">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <div>
-                <strong style="font-size:14px;display:block">${driveUser ? esc(driveUser.name || driveUser.email) : 'Google Drive no conectado'}</strong>
-                <span class="small muted">${driveUser ? 'Conectado a ' + esc(driveUser.email) + ' · Carpeta «Lumcards Mazos y Estudio»' : 'Conecta tu cuenta para respaldar tus libros y fotos gratis'}</span>
-              </div>
-              <span class="badge" style="${driveUser ? 'background:rgba(16,185,129,0.15);color:#10b981' : 'background:rgba(100,116,139,0.15);color:#64748b'}">
-                ${driveUser ? '✓ Vinculado' : 'Sin vincular'}
-              </span>
-            </div>
-          </div>
-
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            ${driveUser ? `
-              <button class="btn btn-primary" data-action="drive-backup-now">${icon('upload')} Subir mis mazos a mi Google Drive</button>
-              <button class="btn btn-quiet" data-action="drive-list-modal">${icon('download')} Descargar de mi Drive</button>
-              <button class="btn btn-quiet" data-action="drive-disconnect">Desconectar</button>
-            ` : `
-              <button class="btn btn-primary" data-action="drive-connect">${icon('globe')} Conectar mi cuenta de Google Drive</button>
-            `}
-          </div>
-        </section>
-      </div>
-
-      <!-- COLUMNA 2: ALMACENAMIENTO LOCAL Y ACCESO MÓVIL / APK -->
-      <div style="display:flex;flex-direction:column;gap:24px">
-        <!-- 3. ACCESO MÓVIL Y APK ANDROID -->
-        <section class="sync-card">
-          <div class="sync-card-header">
-            <div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                <span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;font-weight:700">ANDROID & WEB</span>
-                <span class="small muted">Multiplataforma</span>
-              </div>
-              <h2 class="sync-card-title">${icon('globe')} Acceso Móvil (Wi-Fi y APK)</h2>
-              <p class="sync-card-desc">Estudia en tu teléfono o tablet desde la cama o el sillón escaneando el código QR o instalando la versión móvil.</p>
-            </div>
-          </div>
-
-          <div class="sync-qr-card-body">
-            <div class="sync-qr-wrapper" id="sync-qr-box">
-              ${s.qrSvg || '<div style="display:grid;place-items:center;height:100%;color:var(--muted)">Generando QR...</div>'}
-            </div>
-            <div class="sync-qr-info">
-              <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:0.5px">ENLACE LOCAL WI-FI:</div>
-              <div class="sync-url-pill">
-                <span id="sync-url-text">${esc(s.url)}</span>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-                <button class="btn btn-primary" data-action="copy-sync-url">${icon('check')} Copiar enlace</button>
-                <button class="btn btn-quiet" data-action="open-sync-mobile">${icon('globe')} Probar en navegador</button>
-              </div>
-              <ol class="sync-steps-list" style="margin-top:8px;font-size:12.5px">
-                <li>Conecta tu móvil a la <strong>misma red Wi-Fi</strong>.</li>
-                <li>Escanea el código QR con tu cámara o abre el enlace.</li>
-                <li>En Android: pulsa «Instalar app» en el navegador para guardarla como APK PWA en tu pantalla de inicio.</li>
-              </ol>
-            </div>
-          </div>
-        </section>
-
-        <!-- 4. ALMACENAMIENTO LOCAL EN DISPOSITIVO -->
-        <section class="sync-card">
-          <div class="sync-card-header">
-            <div>
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                <span class="badge" style="background:rgba(100,116,139,0.15);color:#64748b;font-weight:700">OFFLINE DISPOSITIVO</span>
-                <span class="small muted">Respaldo Físico</span>
-              </div>
-              <h2 class="sync-card-title">${icon('archive')} Almacenamiento Local Offline</h2>
-              <p class="sync-card-desc">Tus tarjetas se conservan siempre en el disco de tu PC o memoria de tu móvil para estudiar sin conexión a internet.</p>
-            </div>
-          </div>
-
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <a class="btn btn-primary" href="/api/sync/export" download>${icon('download')} Exportar paquete (.colpkg)</a>
-            <button class="btn btn-quiet" data-action="pick-file">${icon('upload')} Importar paquete</button>
-          </div>
-          <div class="sync-history-badge" style="margin-top:10px">
-            <span>Último paquete exportado:</span>
-            <strong>${esc(lastExport)}</strong>
-          </div>
-        </section>
-      </div>
+    <div class="workspace-grid">
+      <section class="panel workspace-card"><span class="eyebrow">Transferencia local</span><h2>Abre tu biblioteca en la misma red</h2>${isWebMode?'<p>Estás usando la versión web. El acceso por Wi-Fi se configura desde la aplicación de escritorio.</p>':!s?`<p role="status">${syncInfoError?'No se pudo consultar el enlace local.':'Consultando el enlace local…'}</p>${button('Volver a consultar','retry-sync-info','cloud')}`:`<p>Conecta ambos dispositivos a la misma red y mantén Lumcards abierto en el equipo.</p><div class="workspace-local">${s.qrSvg?`<div class="workspace-qr">${s.qrSvg}</div>`:''}<div><p id="sync-url-text" class="workspace-url">${esc(s.url)}</p><div class="workspace-actions">${button('Copiar enlace','copy-sync-url','check')}${button('Abrir enlace','open-sync-mobile','globe')}</div></div></div>`}</section>
+      <section class="panel workspace-card"><span class="eyebrow">Tu biblioteca</span><h2>Importar y conservar copias</h2><p>Revisa las opciones de importación y exportación antes de trasladar tus tarjetas a otro dispositivo.</p><div class="workspace-actions">${button('Ver copias y transferencias','nav','archive','', 'data-view="backups"')}${button('Importar un paquete','import','upload')}</div>${s?.lastExport?`<p class="info-box">Último paquete registrado: ${esc(s.lastExport.filename)}.</p>`:''}</section>
     </div>
   </div>`;
 }
 
+function accessStatusCard(){
+  const fbUser = window.LumcardsSync?.firebase?.getUser();
+  if (!fbUser || accessInfo?.localOnly) return '';
+  if (!accessInfo) return `<section class="panel workspace-card"><span class="eyebrow">Acceso</span><h2>Acceso sin comprobar</h2><p>No se pudo confirmar el estado de tu cuenta. Revisa la conexión y vuelve a consultarlo.</p>${button('Consultar acceso','nav','cloud','','data-view="sync"')}</section>`;
+  if (accessInfo.isAdmin) {
+    return `<section class="panel workspace-card"><span class="eyebrow">Acceso</span><h2>Cuenta administradora</h2><p>Tienes acceso total y puedes aprobar o revocar el acceso de otros usuarios.</p><div class="workspace-actions">${button('Panel de administración','nav','shield','btn-primary','data-view="admin"')}</div></section>`;
+  }
+  if (accessInfo.approved) {
+    return `<section class="panel workspace-card"><span class="eyebrow">Acceso</span><h2>Acceso aprobado</h2><p>El administrador ha aprobado el acceso de esta cuenta.</p></section>`;
+  }
+  return `<section class="panel workspace-card"><span class="eyebrow">Acceso</span><h2>Acceso pendiente de aprobación</h2><p>Tu cuenta está registrada pero aún no tiene acceso premium. Si ya realizaste el pago acordado, espera la confirmación del administrador. Puedes volver a consultar tu estado desde Cuenta y sincronización.</p>${accessInfo.note?`<p class="info-box">Nota del administrador: ${esc(accessInfo.note)}</p>`:''}</section>`;
+}
+
+let adminUsers = [], adminUsersError = '', adminUsersLoading = false;
+async function loadAdminUsers(){
+  adminUsersLoading = true;
+  if (view === 'admin') render();
+  try {
+    adminUsersError = '';
+    adminUsers = await window.LumcardsSync?.firebase?.listAllUsers() || [];
+  } catch (e) {
+    adminUsers = [];
+    adminUsersError = e.message;
+    console.warn('Admin users error:', e);
+  } finally { adminUsersLoading = false; }
+}
+function adminView(){
+  const isAdminUser = Boolean(window.LumcardsSync?.firebase?.isAdmin?.());
+  if (!isAdminUser) {
+    return `<div class="workspace-page">${heading('Acceso restringido.','Esta sección es solo para el administrador de Lumcards.')}</div>`;
+  }
+  const rows = adminUsers.filter(u => !u.isAdmin);
+  return `<div class="workspace-page">${heading('Aprueba el acceso de tus estudiantes.','Confirma el pago por Yape y activa el acceso. Revócalo cuando lo necesites.',button('Actualizar lista','refresh-admin-users','cloud'))}
+    ${adminUsersLoading?'<p class="info-box" role="status">Cargando cuentas. Espera a que termine la consulta.</p>':''}
+    ${adminUsersError ? `<p class="info-box" role="alert">No se pudo cargar la lista: ${esc(adminUsersError)}. Revisa la conexión o los permisos y pulsa Actualizar lista para reintentar.</p>` : ''}
+    ${!rows.length && !adminUsersError && !adminUsersLoading ? '<p class="info-box">No hay cuentas para mostrar. Actualiza la lista después de que se registre un estudiante.</p>' : ''}
+    <div class="two-col">
+      ${rows.map(u => `
+        <section class="panel admin-account-card">
+          <h2 class="admin-account-name">${esc(u.name || u.email || u.uid)}</h2>
+          <p class="small muted">${esc(u.email || '')}</p>
+          <p class="small">Estado: <strong class="admin-access-state">${u.accessApproved?'✓ Aprobado':'○ Pendiente'}</strong></p>
+          ${u.accessNote ? `<p class="small muted">Nota: ${esc(u.accessNote)}</p>` : ''}
+          <div class="workspace-actions" style="margin-top:10px">
+            ${u.accessApproved
+              ? button('Revocar acceso','admin-set-access','close','btn-quiet text-danger',`data-uid="${esc(u.uid)}" data-approve="0"`)
+              : button('Aprobar acceso','admin-set-access','check','btn-primary',`data-uid="${esc(u.uid)}" data-approve="1"`)}
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  </div>`;
+}
+function confirmAdminAccess(uid, approve) {
+  const user = adminUsers.find(u=>u.uid===uid);
+  if (!user || !window.LumcardsSync?.firebase?.isAdmin?.()) return;
+  const name = user.name || user.email || user.uid;
+  showModal(approve?'¿Aprobar esta cuenta?':'¿Revocar el acceso?',
+    approve?'Confirma el pago acordado antes de aprobar. Podrás revocar este acceso desde Administración.':'La cuenta dejará de tener acceso aprobado. Su biblioteca no se elimina. Podrás aprobarla nuevamente desde Administración.',
+    `<p class="info-box">Cuenta: <strong>${esc(name)}</strong><br>${esc(user.email||'')}</p>
+     ${approve?'<label class="field">Nota opcional<textarea id="admin-access-note" rows="3" placeholder="Referencia del acuerdo o confirmación"></textarea></label>':''}
+     <p class="form-error" id="admin-access-error" role="alert"></p>
+     <div class="form-footer">${button('Cancelar','close-modal')}<button type="button" id="admin-access-confirm" class="btn ${approve?'btn-primary':'btn-danger'}">${approve?'Aprobar acceso':'Revocar acceso'}</button></div>`);
+  $('#admin-access-confirm').addEventListener('click',async()=>{
+    const submit = $('#admin-access-confirm'), error = $('#admin-access-error');
+    const note = approve ? ($('#admin-access-note')?.value.trim() || '') : '';
+    submit.disabled = true; error.textContent = ''; loading(true);
+    try {
+      const result = await window.LumcardsSync.firebase.setUserAccess(uid,approve,note);
+      if (!result?.success) throw new Error('No se confirmó el cambio. Vuelve a intentarlo.');
+      modal.close(); await loadAdminUsers(); render();
+      toast(approve?'Acceso aprobado.':'Acceso revocado.');
+    } catch (err) { error.textContent=err.message; submit.disabled=false; }
+    finally { loading(false); }
+  });
+}
+window.addEventListener('offline',()=>{if(view==='sync')render();document.querySelectorAll('[data-connection-status]').forEach(el=>el.textContent='Sin conexión · revisa los cambios pendientes antes de transferir.');});
+window.addEventListener('online',()=>{if(view==='sync')render();document.querySelectorAll('[data-connection-status]').forEach(el=>el.textContent='Conexión disponible · no confirma una sincronización.');});
+
 function firebaseLoginModal(){
-  showModal('Cuenta en la Nube · Google y Firebase', 'Inicia sesión con tu cuenta de Google para sincronizar tus mazos, tarjetas y progreso en todos tus dispositivos.', `
+  showModal('Cuenta en la Nube · Google', 'Inicia sesión con tu cuenta de Google para sincronizar tus mazos, tarjetas y progreso en todos tus dispositivos.', `
     <div style="margin-bottom:16px">
       <button type="button" class="btn" id="fb-google-btn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 18px;font-weight:600;font-size:15px;border-radius:10px;border:1px solid #dadce0;background:#ffffff;color:#3c4043;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,0.1);transition:all 0.2s ease" data-action="firebase-google-login">
         <svg width="20" height="20" viewBox="0 0 24 24">
@@ -2542,44 +2543,17 @@ function firebaseLoginModal(){
         <span>Continuar con mi cuenta de Google</span>
       </button>
     </div>
-
-    <div style="display:flex;align-items:center;text-align:center;margin:16px 0;color:var(--muted);font-size:13px">
-      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
-      <span style="padding:0 12px">o con correo y contraseña</span>
-      <span style="flex:1;border-bottom:1px solid var(--line)"></span>
+    <div class="info-box" style="margin-bottom:14px">
+      Tus sesiones de estudio, rachas diarias y estadísticas se sincronizarán al instante entre todos tus dispositivos.
     </div>
-
-    <form id="firebase-auth-form">
-      <div style="display:flex;gap:10px;margin-bottom:14px">
-        <button type="button" class="btn btn-primary" id="fb-mode-login-btn" style="flex:1" onclick="window.setFbAuthMode('login')">Iniciar Sesión</button>
-        <button type="button" class="btn btn-quiet" id="fb-mode-register-btn" style="flex:1" onclick="window.setFbAuthMode('register')">Crear Cuenta</button>
-      </div>
-      <input type="hidden" name="authMode" id="fb-auth-mode" value="login">
-      <div id="fb-name-field" style="display:none">
-        <label class="field">Nombre de usuario
-          <input type="text" name="displayName" id="fb-auth-name" placeholder="Tu nombre">
-        </label>
-      </div>
-      <label class="field">Correo electrónico
-        <input type="email" name="email" id="fb-auth-email" placeholder="estudiante@ejemplo.com" required autofocus>
-      </label>
-      <label class="field">Contraseña
-        <input type="password" name="password" id="fb-auth-pass" placeholder="••••••••" minlength="6" required>
-      </label>
-      <div class="info-box" id="fb-auth-info">
-        Tus sesiones de estudio, rachas diarias y estadísticas se sincronizarán al instante entre todos tus dispositivos.
-      </div>
-      <div style="margin:12px 0;text-align:center">
-        <button type="button" class="btn btn-quiet" style="width:100%" data-action="firebase-guest-login">
-          ${icon('globe')} Continuar como Invitado (Modo local sin contraseña)
-        </button>
-      </div>
-      <div class="form-error" role="alert"></div>
-      <div class="form-footer">
-        ${button('Cancelar', 'close-modal')}
-        <button class="btn btn-primary" data-mutate id="fb-auth-submit">${icon('cloud')} Iniciar Sesión</button>
-      </div>
-    </form>
+    <div style="margin:12px 0;text-align:center">
+      <button type="button" class="btn btn-quiet" style="width:100%" data-action="firebase-guest-login">
+        ${icon('globe')} Continuar como Invitado (Modo local, sin cuenta)
+      </button>
+    </div>
+    <div class="form-footer">
+      ${button('Cancelar', 'close-modal')}
+    </div>
   `);
 }
 
@@ -2605,19 +2579,15 @@ window.setFbAuthMode = function(mode){
 };
 
 function driveConnectModal(){
-  const curEmail = window.LumcardsSync?.drive?.getUser()?.email || '';
-  showModal('Vincular tu Google Drive', 'Guarda tus libros con fotos y audios en tus 15 GB gratuitos de Google Drive.', `
+  showModal('Vincular tu Google Drive', 'Conecta tu cuenta para solicitar transferencias de paquetes de tu biblioteca.', `
     <form id="drive-auth-form">
       <div class="info-box">
-        <strong>15 GB Gratuitos · Cero Costos de Servidor:</strong><br>
-        Tus archivos se guardan directamente en tu cuenta privada de Google en la carpeta segura <strong>«Lumcards Mazos y Estudio»</strong>. Nadie más tiene acceso a tus datos ni a tus libros.
+        <strong>Conexión a tu cuenta:</strong><br>
+        Los paquetes se gestionan en la carpeta <strong>«Lumcards Mazos y Estudio»</strong>. La capacidad y los permisos dependen de tu cuenta de Google. Conectar una cuenta no confirma una copia de tus archivos.
       </div>
-      <label class="field">Tu cuenta o correo de Google
-        <input type="email" name="email" id="drive-auth-email" placeholder="usuario@gmail.com" value="${esc(curEmail)}" required autofocus>
-      </label>
+      <p>Google abrirá una ventana para elegir tu cuenta y autorizar el acceso a las copias de Lumcards.</p>
       <div class="info-box" style="background:rgba(99,102,241,0.06);border-color:rgba(99,102,241,0.2);margin-top:10px">
-        💡 <strong>Sin configuraciones complejas ni llaves API:</strong><br>
-        No necesitas crear proyectos en Google Cloud ni buscar Client IDs. Lumcards vincula tu cuenta directamente y te permite respaldar y restaurar tus libros y tarjetas de forma transparente.
+        Después de conectar, revisa el resultado de cada transferencia. Conserva una copia local antes de restaurar o importar contenido.
       </div>
       <div class="form-error" role="alert"></div>
       <div class="form-footer">
@@ -2778,7 +2748,7 @@ function studyView(){
 
   return `<section class="study-surface study-fullscreen"><div class="anki-topbar"><div style="display:flex;gap:10px;align-items:center;min-width:0"><button class="anki-side-action" data-action="${isExamSession?'exit-study':'back-decks'}" title="Volver a los mazos (Esc)">${icon('back')}<span>Mazos</span></button><h2 title="${esc(d?.name||'Mazo')}">${isExamSession ? 'Modo Examen · ' + esc(d?.name||'Biblioteca') : esc(d?.name||'4000 Essential English Words')}</h2></div>${centerTopHeader}<div style="display:flex;gap:8px;align-items:center"><button class="icon-button" data-action="replay-audio" aria-label="Repetir audio" title="Repetir audio (R)" style="color:#94a3b8"><svg class="icon" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button><button class="icon-button" data-action="edit-card" data-id="${c.id}" aria-label="Editar tarjeta" title="Editar tarjeta (E)" style="color:#38bdf8">${icon('edit')}</button><button class="icon-button ${c.starred?'starred':''}" data-action="star" data-id="${c.id}" aria-label="Marcar como favorita" title="Marcar como favorita (S)" style="color:#94a3b8">${icon('star')}</button><button class="icon-button" data-action="toggle-fullscreen" aria-label="${isFullscreen?'Salir de pantalla completa':'Pantalla completa'}" title="Pantalla completa (F)" style="color:#94a3b8">${icon(isFullscreen?'shrink':'expand')}</button></div></div><div class="anki-study-stage"><div class="anki-card-container"><iframe class="anki-card-frame" id="study-frame" title="${revealed?'Respuesta':'Pregunta'} de la tarjeta" sandbox="allow-scripts allow-same-origin" allow="autoplay" referrerpolicy="no-referrer"></iframe></div><div class="anki-bottom-bar"><div class="anki-study-center">${c.renderError?`<div style="display:flex;gap:10px;align-items:center"><button class="anki-side-action" data-action="skip-card">Omitir por hoy</button></div>`:revealed?`<div class="anki-rating-grid">${(isExamSession ? ['Fallo', 'Difícil', 'Bien', 'Fácil'] : ['Otra vez','Difícil','Bien','Fácil']).map((label,i)=>`<div class="anki-rate-col"><span class="anki-interval">${esc(intervals[i]||['<1m','<6m','<10m','3d'][i])}</span><button class="anki-rate-button rate-col-${i+1}" data-action="rate" data-rating="${i+1}" ${busy?'disabled':''}><span class="rate-name">${label}</span><kbd>${i+1}</kbd></button></div>`).join('')}</div>`:`<button class="anki-btn-show" data-action="reveal" id="btn-reveal-answer"><span>Mostrar respuesta</span><kbd>Espacio</kbd></button>`}</div></div></div></section>`;
 }
-function render(){document.body.classList.remove('menu-open');document.body.classList.toggle('in-study',view==='study');const focused=$('#global-search')===document.activeElement,pos=$('#global-search')?.selectionStart;app.innerHTML=view==='study'?studyView():shell(view==='decks'?dashboard():view==='cards'?cardsView():view==='favorites'?cardsView(true):view==='stats'?statistics():view==='backups'?backupsView():view==='sync'?syncView():settingsView());if(view==='study'&&currentCard()){const c=currentCard();mountCard($('#study-frame'),c,revealed);const stateKey=`${c.id}_${revealed?'ans':'que'}`;if(lastPlayedKey!==stateKey){lastPlayedKey=stateKey;const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios&&audios.length>0){AudioController.playList(audios);}else{AudioController.stop();}}}else{lastPlayedKey=null;AudioController.stop();}if(focused&&$('#global-search')){try{$('#global-search').focus();$('#global-search').setSelectionRange(pos,pos);}catch{}}}
+function render(){document.body.classList.remove('menu-open');document.body.classList.toggle('in-study',view==='study');const focused=$('#global-search')===document.activeElement,pos=$('#global-search')?.selectionStart;app.innerHTML=view==='study'?studyView():shell(view==='decks'?dashboard():view==='cards'?cardsView():view==='favorites'?cardsView(true):view==='stats'?statistics():view==='backups'?backupsView():view==='sync'?syncView():view==='admin'?adminView():settingsView());if(view==='study'&&currentCard()){const c=currentCard();mountCard($('#study-frame'),c,revealed);const stateKey=`${c.id}_${revealed?'ans':'que'}`;if(lastPlayedKey!==stateKey){lastPlayedKey=stateKey;const audios=revealed?(c.answerAudios||[]):(c.questionAudios||[]);if(audios&&audios.length>0){AudioController.playList(audios);}else{AudioController.stop();}}}else{lastPlayedKey=null;AudioController.stop();}if(focused&&$('#global-search')){try{$('#global-search').focus();$('#global-search').setSelectionRange(pos,pos);}catch{}}}
 
 function safeCardHTML(html){const template=document.createElement('template');template.innerHTML=html||'';const doc=template.content;doc.querySelectorAll('script,iframe,object,embed,form,input,button,textarea,select,base,link,meta').forEach(e=>e.remove());doc.querySelectorAll('audio').forEach(audio=>{let src=audio.getAttribute('src');if(!src){const source=audio.querySelector('source');if(source)src=source.getAttribute('src');}if(!src)return;try{const u=new URL(src,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))src=u.href;}catch{}const btn=document.createElement('button');btn.type='button';btn.className='anki-audio-pill';btn.setAttribute('data-src',src);btn.setAttribute('aria-label','Reproducir audio');btn.setAttribute('title','Reproducir audio');btn.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>';const media=document.createElement('audio');media.className='anki-audio-media';media.preload='auto';media.crossOrigin='anonymous';media.src=src;btn.appendChild(media);audio.replaceWith(btn);});doc.querySelectorAll('*').forEach(el=>{for(const a of [...el.attributes]){if(/^on/i.test(a.name)||['srcdoc','action','formaction','srcset','autoplay'].includes(a.name))el.removeAttribute(a.name);if(['href','xlink:href'].includes(a.name)&&!a.value.startsWith('#')){if(el.namespaceURI==='http://www.w3.org/2000/svg'&&el.localName==='image'){try{const u=new URL(a.value,location.origin+'/media/');if(u.origin===location.origin&&u.pathname.startsWith('/media/'))el.setAttribute(a.name,u.href);else el.removeAttribute(a.name);}catch{el.removeAttribute(a.name);}}else el.removeAttribute(a.name);}if(['src','poster'].includes(a.name)){if(/^(data:(image|audio)\/)/i.test(a.value))continue;try{const url=new URL(a.value,location.origin+'/media/');if(url.origin!==location.origin||!url.pathname.startsWith('/media/'))el.removeAttribute(a.name);else el.setAttribute(a.name,url.href);}catch{el.removeAttribute(a.name);}}}});if(typeof window.renderMathInElement==='function'){window.renderMathInElement(template.content,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false},{left:'$$',right:'$$',display:true}],throwOnError:false,trust:false,maxExpand:1000,maxSize:20,strict:'ignore'});}return template.innerHTML;}
 const CARD_THEMES = {
@@ -2890,7 +2860,8 @@ ${card.css?'<style>'+String(card.css).replace(/<\/style/gi,'')+'</style>':''}
 ${lumcardsEnforcementCss}
 ${scriptTag}</head><body class="anki-card-body"><main class="card"><div class="card-content-wrapper ${isShort?'card-short':'card-long'}">${cardHtml}</div></main></body></html>`;
 }
-function showModal(title,intro,content,customClass=''){modal.className=customClass;modal.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Cerrar">${icon('close')}</button></div><p class="dialog-intro">${intro}</p>${content}`;if(!modal.open)modal.showModal();}
+let modalReturnFocus = null;
+function showModal(title,intro,content,customClass=''){if(!modal.open)modalReturnFocus=document.activeElement;modal.className=customClass;modal.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Cerrar">${icon('close')}</button></div><p class="dialog-intro">${intro}</p>${content}`;if(!modal.open)modal.showModal();else (modal.querySelector('[autofocus]')||modal.querySelector('button'))?.focus();}
 function renderDeckPreviewBox(d) {
   return `<div class="card-preview-container">
     <div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--muted);text-transform:uppercase">Vista previa en biblioteca (muestra inerte)</div>
@@ -2995,10 +2966,10 @@ async function cardForm(id){
   const sourceFields=c?.fields||[{name:'Pregunta · anverso',value:draft?.front||''},{name:'Respuesta · reverso',value:draft?.back||''}];
   const fields=sourceFields.map((f,i)=>`<label class="field"><span class="field-label" style="display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;margin-bottom:6px"><span>${esc(f.name)}</span></span><textarea name="${c?'field_'+i:i===0?'front':'back'}" id="card-field-${i}" ${!c&&i===0?'required':''} placeholder="${i===0?'¿Qué quieres recordar?':'Escribe el contenido…'}" rows="${sourceFields.length>3?3:4}" style="width:100%;font-size:14px;padding:10px;border-radius:8px">${esc(f.value)}</textarea></label>`).join('');
 
-  showModal(c?'Editar tarjeta':'Captura algo que quieras recordar.',c?`Nota: ${esc(c.modelName)} · Se guardará directamente en esta pestaña sin salir.`:'Elige una pregunta concreta y una respuesta que puedas recordar.',`
-    <div class="mobile-tab-bar">
-      <button type="button" class="btn btn-quiet active" id="card-tab-edit">Editar contenido</button>
-      <button type="button" class="btn btn-quiet" id="card-tab-preview">Vista previa interactiva</button>
+  showModal(c?'Editar tarjeta':'Captura algo que quieras recordar.',c?`Nota: ${esc(c.modelName)} · Los cambios solo se guardan al pulsar Guardar cambios.`:'Elige una pregunta concreta y una respuesta que puedas recordar.',`
+    <div class="mobile-tab-bar" role="group" aria-label="Editor y vista previa">
+      <button type="button" class="btn btn-quiet active" id="card-tab-edit" aria-pressed="true" aria-controls="card-form-col">Editar contenido</button>
+      <button type="button" class="btn btn-quiet" id="card-tab-preview" aria-pressed="false" aria-controls="card-preview-col">Vista previa interactiva</button>
     </div>
     <div class="editor-split-grid" style="align-items:stretch">
       <div id="card-form-col">
@@ -3024,7 +2995,7 @@ async function cardForm(id){
         <div style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;flex-wrap:wrap">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--muted);text-transform:uppercase">Vista previa</span>
-            <select id="card-preview-mode-select" style="font-size:11px;padding:3px 6px;border-radius:6px;background:var(--bg);border:1px solid var(--line);color:var(--text);cursor:pointer">
+            <select id="card-preview-mode-select" aria-label="Modo de vista previa">
               <option value="card" selected>Tarjeta (Repaso)</option>
               <option value="choice">Modo Elegir</option>
               <option value="write">Modo Escribir</option>
@@ -3078,12 +3049,14 @@ async function cardForm(id){
 
     if (tabEdit && tabPreview && formCol && previewCol) {
       tabEdit.addEventListener('click', () => {
+        tabEdit.setAttribute('aria-pressed','true'); tabPreview.setAttribute('aria-pressed','false');
         tabEdit.classList.add('active');
         tabPreview.classList.remove('active');
         formCol.style.display = 'block';
         previewCol.style.display = 'none';
       });
       tabPreview.addEventListener('click', () => {
+        tabPreview.setAttribute('aria-pressed','true'); tabEdit.setAttribute('aria-pressed','false');
         tabPreview.classList.add('active');
         tabEdit.classList.remove('active');
         formCol.style.display = 'none';
@@ -3106,14 +3079,14 @@ async function cardForm(id){
       if (!frame) return;
       const frontInput = $('#card-field-0')?.value || '';
       const backInput = $('#card-field-1')?.value || '';
-      const kind = $('#note-kind')?.value || 'basic';
+      const kind = $('#note-kind')?.value || (c?.isCloze && !c?.isImageOcclusion ? 'cloze' : 'basic');
 
       let frontHtml = frontInput.trim() || '<em>(Escribe una pregunta para ver el anverso)</em>';
       let backHtml = backInput.trim() || '<em>(Escribe una respuesta para ver el reverso)</em>';
 
       if (kind === 'cloze' && frontInput) {
-        frontHtml = frontInput.replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, '<span class="cloze">[$2 || ...]</span>');
-        backHtml = frontInput.replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, '<span class="cloze">$1</span>') + (backInput ? `<hr><p>${backInput}</p>` : '');
+        frontHtml = frontInput.replace(/\{\{c\d+::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g, (_match, _answer, hint) => `<span class="cloze">[${hint || '…'}]</span>`);
+        backHtml = frontInput.replace(/\{\{c\d+::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g, '<span class="cloze">$1</span>') + (backInput ? `<hr><p>${backInput}</p>` : '');
       }
 
       if (previewMode === 'choice') {
@@ -3270,7 +3243,7 @@ async function startExam(deckId, mode, limit, alterScheduler = false){
 
 function updateEditorKind(){const form=$('#card-form'),kind=$('#note-kind')?.value;if(!form||!kind)return;const labels=form.querySelectorAll('textarea');labels[1].required=kind!=='cloze';labels[0].previousElementSibling.textContent=kind==='cloze'?'Texto con espacios ocultos':'Pregunta · anverso';labels[1].previousElementSibling.textContent=kind==='cloze'?'Información adicional (opcional)':'Respuesta · reverso';$('#editor-tip').textContent=kind==='cloze'?'Escribe, por ejemplo: La capital de Perú es {{c1::Lima}}. Selecciona una palabra y pulsa «Ocultar texto» para marcarla.':kind==='reversed'?'Se crearán dos tarjetas: pregunta → respuesta y respuesta → pregunta. Puedes usar fórmulas entre \( … \).':'Puedes usar HTML básico y fórmulas entre \( … \). Tu borrador se guarda en este navegador.';}
 
-function importModal(){showModal('Tus mazos, como en casa.','Trae tu biblioteca de Anki y empieza a estudiar aquí.',`<a class="btn" href="/practice.html#import" style="margin-bottom:18px">Importar CSV, TSV, TXT o JSON</a><div class="drop-zone" id="drop-zone" role="button" tabindex="0" data-action="pick-file">${icon('upload')}<strong>Arrastra tu archivo aquí</strong><p>o haz clic para elegirlo<br>.apkg · .colpkg · .anki2 · hasta 500 MB</p></div><div class="info-box">Se importan tarjetas, plantillas y archivos multimedia incluidos. Antes de importar, guardamos una copia de tu colección. Las notas repetidas se combinan con el importador de Anki.</div><p class="small muted">Los mazos con complementos o JavaScript propio pueden necesitar ajustes. Para traer imágenes y audio, usa .apkg o .colpkg.</p><div id="import-status" class="form-error" role="status"></div>`);const zone=$('#drop-zone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragging');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragging'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragging');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0]);});zone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#import-file').click();}});}
+function importModal(){showModal('Tus mazos, como en casa.','Trae tu biblioteca de Anki y empieza a estudiar aquí.',`<a class="btn" href="/practice.html#import" style="margin-bottom:18px">Importar CSV, TSV, TXT o JSON</a><div class="drop-zone" id="drop-zone" role="button" tabindex="0" data-action="pick-file">${icon('upload')}<strong>Arrastra tu archivo aquí</strong><p>o haz clic para elegirlo<br>.apkg · .colpkg · .anki2 · hasta 500 MB</p></div><div class="info-box">Se importan tarjetas, plantillas y archivos multimedia incluidos. ${isWebMode?'La importación de paquetes requiere la aplicación de escritorio. Conserva una copia antes de trasladar tu biblioteca.':'Antes de importar, se crea una copia local. Las notas repetidas se combinan y pueden actualizar campos existentes; revisa el resultado antes de continuar estudiando.'}</div><p class="small muted">Los mazos con complementos o JavaScript propio pueden necesitar ajustes. Para traer imágenes y audio, usa .apkg o .colpkg.</p><div id="import-status" class="form-error" role="status"></div>`);const zone=$('#drop-zone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragging');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragging'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragging');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0]);});zone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#import-file').click();}});}
 async function uploadFile(file){if(busy)return;if(!/\.(apkg|colpkg|anki2)$/i.test(file.name)){toast('Elige un archivo .apkg, .colpkg o .anki2.',true);return;}if(file.size>500*1024*1024){toast('El archivo supera el límite de 500 MB.',true);return;}loading(true);const status=$('#import-status');if(status){status.className='small muted';status.textContent='Importando '+file.name+'… Mantén la app abierta.';}try{const res=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Anki-Request':'1'},body:file});const result=await res.json();if(!res.ok)throw new Error(result.error||'No se pudo importar el archivo.');await refresh(false);modal.close();view='decks';search='';filter='all';render();toast(result.message||'Mazo importado. Tu biblioteca está lista.');}catch(e){if(status){status.className='form-error';status.textContent=e.message;}toast(e.message,true);}finally{loading(false);$('#import-file').value='';}}
 async function promptStudyBlock(deckId, forceNew = false) {
   loading(true);
@@ -3457,9 +3430,137 @@ async function rate(rating){
   }finally{loading(false);}
 }
 async function previewCard(id){const c=await api('cards/'+encodeURIComponent(id));if(!c)return;showModal('Una idea para recordar.',esc(data.decks.find(d=>String(d.id)===String(c.deckId))?.name||''),`<iframe class="card-frame" id="preview-frame" title="Contenido de la tarjeta" sandbox="" referrerpolicy="no-referrer" style="height:360px"></iframe><div class="form-footer">${button(c.starred?'Quitar favorito':'Guardar favorito','star','star','',`data-id="${id}"`)}${c.editable?button('Editar tarjeta','edit-card','edit','btn-primary',`data-id="${id}"`):''}</div>${!c.editable?'<p class="small muted">Plantilla importada: para editar su diseño, personalízala desde Ajustes o edita sus campos.</p>':''}`);mountCard($('#preview-frame'),c,true);}
-async function navigate(next){view=next;selectedDeck=null;activeFolder=null;search='';if(next==='backups')backupList=await api('backups');if(next==='cards'||next==='favorites')await loadCards();if(next==='stats')await loadDetailedStats();if(next==='sync')await loadSyncInfo();render();}
+async function navigate(next){view=next;selectedDeck=null;activeFolder=null;search='';if(next==='backups')backupList=await api('backups');if(next==='cards'||next==='favorites')await loadCards();if(next==='stats')await loadDetailedStats();if(next==='sync')await loadSyncInfo();if(next==='sync'||next==='admin')await loadAccessInfo();if(next==='admin')await loadAdminUsers();render();}
 function help(){showModal('A tu ritmo, con menos clics.','Todo lo esencial para empezar.',`<div class="info-box"><strong>1.</strong> Importa un mazo o crea uno.<br><strong>2.</strong> Pulsa «Estudiar» y piensa la respuesta.<br><strong>3.</strong> Muestra la respuesta y elige cuánto recordaste.<br><strong>4.</strong> Vuelve mañana. Lumcards organiza el siguiente repaso óptimo.</div><div class="settings-row"><strong>Buscar en la biblioteca</strong><kbd>Ctrl + K</kbd></div><div class="settings-row"><strong>Mostrar la respuesta / Bien</strong><kbd>Espacio</kbd></div><div class="settings-row"><strong>Calificar un repaso</strong><kbd>1 / 2 / 3 / 4</kbd></div><div class="settings-row"><strong>Repetir audio</strong><kbd>R</kbd></div><div class="settings-row"><strong>Pantalla completa</strong><kbd>F</kbd></div><p class="small muted">La app funciona sin conexión después de instalarse. Reproduce el audio de las tarjetas automáticamente.</p>`);}
 async function confirmDelete(type,id){const d=type==='deck'?data.decks.find(d=>String(d.id)===String(id)):null;const note=type==='card'?await api('cards/'+encodeURIComponent(id)):null;showModal(type==='deck'?'¿Eliminar este mazo?':'¿Eliminar esta tarjeta?',type==='deck'?`Se eliminarán «${esc(d?.name)}» y sus tarjetas. Se guardará una copia antes de continuar.`:`Se eliminará esta nota y sus ${note?.siblingCount||1} tarjetas. Se guardará una copia antes de continuar.`,`<div class="form-footer">${button('Cancelar','close-modal')}${button('Eliminar','confirm-delete','trash','btn-danger',`data-type="${type}" data-id="${id}" data-mutate`)}</div>`);}
+
+async function resetDeckPrompt(deckId) {
+  const d = data.decks.find(x => String(x.id) === String(deckId));
+  if (!d) return;
+  const displayName = d.shortName || d.name;
+  showModal(
+    '¿Reiniciar el progreso del mazo?',
+    'Todas las tarjetas de este mazo volverán a estado "nueva": se borran sus repeticiones, rachas de aciertos e intervalos. El contenido (preguntas y respuestas) no se modifica.',
+    `
+    <div class="delete-deck-prompt-modal">
+      <div class="delete-modal-summary">
+        <div class="delete-modal-row">
+          <span class="muted">Mazo:</span>
+          <strong>📖 ${esc(d.name)}</strong>
+        </div>
+        <div class="delete-modal-row">
+          <span class="muted">Tarjetas afectadas:</span>
+          <span><strong style="color:var(--orange)">${num(d.total)}</strong> tarjetas</span>
+        </div>
+        <div class="delete-modal-row" style="margin-top:4px;font-size:12px;color:var(--muted)">
+          <span>${isWebMode?'La recuperación de copias web no está validada. Conserva un respaldo verificable antes de continuar.':'Se creará una copia de seguridad local antes de reiniciar. Conserva un archivo fuera del equipo.'}</span>
+        </div>
+      </div>
+      <div class="form-error" id="reset-deck-error" role="alert" style="margin-bottom:12px;display:none"></div>
+      <div class="form-footer" style="display:flex;justify-content:flex-end;gap:10px">
+        ${button('Cancelar', 'close-modal')}
+        <button type="button" class="btn btn-danger" id="btn-submit-reset-deck" data-id="${d.id}">
+          ${icon('undo')} Reiniciar progreso
+        </button>
+      </div>
+    </div>
+    `
+  );
+  const submitBtn = $('#btn-submit-reset-deck');
+  const errorBox = $('#reset-deck-error');
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      if (busy) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Reiniciando…';
+      if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
+      loading(true);
+      try {
+        await api('backup');
+        const res = await api('decks/reset', { deckId: d.id });
+        modal.close();
+        await refresh();
+        if (view === 'stats') await loadDetailedStats();
+        toast(`Progreso reiniciado en «${displayName}» (${res?.cardsReset ?? d.total} tarjetas). Se guardó copia de seguridad previa.`);
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `${icon('undo')} Reiniciar progreso`;
+        if (errorBox) {
+          errorBox.textContent = err?.message || 'Error al reiniciar. El mazo no fue modificado.';
+          errorBox.style.display = 'block';
+        }
+        toast(err?.message || 'Error al reiniciar', true);
+      } finally {
+        loading(false);
+      }
+    });
+  }
+}
+
+async function resetAllPrompt() {
+  const totalCards = data.counts?.totalCards ?? data.cards?.length ?? 0;
+  showModal(
+    '¿Reiniciar TODA la colección?',
+    'Esta acción reinicia el progreso de estudio de todas tus tarjetas, en todos tus mazos, a estado "nueva". No se elimina ningún contenido, solo el progreso.',
+    `
+    <div class="delete-deck-prompt-modal">
+      <div class="delete-modal-summary">
+        <div class="delete-modal-row">
+          <span class="muted">Tarjetas afectadas:</span>
+          <span><strong style="color:#ef4444">${num(totalCards)}</strong> tarjetas en toda la biblioteca</span>
+        </div>
+        <div class="delete-modal-row" style="margin-top:4px;font-size:12px;color:var(--muted)">
+          <span>${isWebMode?'La recuperación de copias web no está validada. Conserva un respaldo verificable antes de continuar.':'Se creará una copia de seguridad local antes de reiniciar. Conserva un archivo fuera del equipo.'}</span>
+        </div>
+      </div>
+      <div class="form-error" id="reset-all-error" role="alert" style="margin-bottom:12px;display:none"></div>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:12px 0;font-size:13px;color:var(--muted)">
+        <input type="checkbox" id="reset-all-confirm-check" style="margin-top:3px">
+        <span>Entiendo que esta acción reinicia el progreso de estudio de toda mi colección y no se puede deshacer desde la app.</span>
+      </label>
+      <div class="form-footer" style="display:flex;justify-content:flex-end;gap:10px">
+        ${button('Cancelar', 'close-modal')}
+        <button type="button" class="btn btn-danger" id="btn-submit-reset-all" disabled>
+          ${icon('undo')} Reiniciar toda la colección
+        </button>
+      </div>
+    </div>
+    `
+  );
+  const checkbox = $('#reset-all-confirm-check');
+  const submitBtn = $('#btn-submit-reset-all');
+  const errorBox = $('#reset-all-error');
+  if (checkbox && submitBtn) {
+    checkbox.addEventListener('change', () => { submitBtn.disabled = !checkbox.checked; });
+  }
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      if (busy) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Reiniciando…';
+      if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
+      loading(true);
+      try {
+        await api('backup');
+        const res = await api('reset-all');
+        modal.close();
+        await refresh();
+        if (view === 'stats') await loadDetailedStats();
+        toast(`Progreso reiniciado en toda la colección (${res?.cardsReset ?? totalCards} tarjetas). Se guardó copia de seguridad previa.`);
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = `${icon('undo')} Reiniciar toda la colección`;
+        if (errorBox) {
+          errorBox.textContent = err?.message || 'Error al reiniciar. La colección no fue modificada.';
+          errorBox.style.display = 'block';
+        }
+        toast(err?.message || 'Error al reiniciar', true);
+      } finally {
+        loading(false);
+      }
+    });
+  }
+}
 
 async function deleteDeckPrompt(deckId) {
   const d = data.decks.find(x => String(x.id) === String(deckId));
@@ -3925,10 +4026,12 @@ document.addEventListener('click', async e => {
     else if (a === 'close-menu') setMobileMenu(false);
     else if (a === 'study-tools') studyTools();
     else if (a === 'theme') {
+      const focusSelector = el.closest('#settings-form') ? '#settings-form [data-action=theme]' : '.top-tools [data-action=theme]';
       theme = theme === 'dark' ? 'light' : 'dark';
       localStorage.setItem('anki2-theme', theme);
       document.documentElement.classList.toggle('dark', theme === 'dark');
       render();
+      $(focusSelector)?.focus();
     }
     else if (a === 'help') help();
     else if (a === 'insert-cloze') {
@@ -4002,6 +4105,10 @@ document.addEventListener('click', async e => {
       const url = $('#sync-url-text')?.textContent;
       if (url) window.open(url, '_blank');
     }
+    else if (a === 'retry-stats') { await loadDetailedStats(); render(); $('#main')?.focus(); }
+    else if (a === 'retry-sync-info') { await loadSyncInfo(); render(); }
+    else if (a === 'refresh-admin-users') { loading(true); try { await loadAdminUsers(); render(); } finally { loading(false); } }
+    else if (a === 'admin-set-access') confirmAdminAccess(el.dataset.uid, el.dataset.approve === '1');
     else if (a === 'firebase-login-modal') firebaseLoginModal();
     else if (a === 'firebase-google-login') {
       loading(true);
@@ -4023,6 +4130,7 @@ document.addEventListener('click', async e => {
         modal.close();
         toast(`¡Bienvenido! Sesión iniciada con Google (${res.user.email})`);
         await syncFromCloudIfAvailable();
+        await loadAccessInfo();
         await refresh();
       } catch (err) {
         toast(err.message, true);
@@ -4032,20 +4140,27 @@ document.addEventListener('click', async e => {
     }
     else if (a === 'firebase-logout') {
       await window.LumcardsSync?.firebase?.signOut();
+      accessInfo = null;
+      setWorkspaceTransfer('firebase','idle');
       render();
       toast('Sesión cerrada en Firebase.');
     }
     else if (a === 'firebase-sync-now') {
+      setWorkspaceTransfer('firebase','syncing');
       loading(true);
       try {
         const store = getWebData();
         const res = await window.LumcardsSync?.firebase?.syncFullWorkspace(store);
-        if (res && res.success) {
-          toast('¡Todo tu espacio de estudio, libros y tarjetas están sincronizados en la nube!');
+        if (res?.success && res.cloud && !res.localMock) {
+          setWorkspaceTransfer('firebase','synced');
+          toast('Transferencia a la nube confirmada.');
         } else {
-          toast(res?.error || 'Sincronización guardada localmente.', !res?.success);
+          const message = res?.error || 'No se confirmó una transferencia a la nube. Revisa tu cuenta y vuelve a intentarlo.';
+          setWorkspaceTransfer('firebase','error',message);
+          toast(message,true);
         }
       } catch(err) {
+        setWorkspaceTransfer('firebase','error',err.message);
         toast(err.message, true);
       } finally {
         loading(false);
@@ -4058,13 +4173,14 @@ document.addEventListener('click', async e => {
       const labels = {
         device: 'Almacenamiento Local en este Dispositivo',
         firebase: 'Nube Lumcards (Sincronización con cuenta)',
-        gdrive: 'Google Drive Personal (15 GB para libros)'
+        gdrive: 'Google Drive Personal'
       };
-      toast(`Destino activo: ${labels[dest] || dest}`);
+      toast(`Destino preferido: ${labels[dest] || dest}. No se han trasladado datos.`);
       render();
     }
     else if (a === 'firebase-guest-login') {
       window.LumcardsSync?.firebase?.continueAsGuest();
+      await loadAccessInfo();
       modal.close();
       toast('¡Has ingresado como Estudiante Invitado!');
       render();
@@ -4072,10 +4188,12 @@ document.addEventListener('click', async e => {
     else if (a === 'drive-connect') driveConnectModal();
     else if (a === 'drive-disconnect') {
       window.LumcardsSync?.drive?.signOut();
+      setWorkspaceTransfer('drive','idle');
       render();
       toast('Google Drive desconectado.');
     }
     else if (a === 'drive-backup-now') {
+      setWorkspaceTransfer('drive','syncing');
       loading(true);
       try {
         let blob;
@@ -4092,11 +4210,16 @@ document.addEventListener('click', async e => {
         const filename = `lumcards_backup_${now}.colpkg`;
         const resUpload = await window.LumcardsSync?.drive?.uploadDeck(blob, filename);
         if (resUpload?.downloaded) {
-          toast(`¡Respaldo descargado y registrado para tu Drive! (${filename})`);
+          setWorkspaceTransfer('drive','error','Archivo descargado. No se confirmó una subida a Google Drive.');
+          toast('Archivo descargado; la subida a Drive no está confirmada.');
+        } else if (resUpload?.id) {
+          setWorkspaceTransfer('drive','synced');
+          toast(`Copia confirmada en Google Drive: ${filename}`);
         } else {
-          toast(`¡Copia guardada en tu Google Drive! (${filename})`);
+          throw new Error('No se confirmó la subida. Revisa tu conexión y vuelve a intentarlo.');
         }
       } catch(err) {
+        setWorkspaceTransfer('drive','error',err.message);
         toast('Error al respaldar en Drive: ' + err.message, true);
       } finally {
         loading(false);
@@ -4213,6 +4336,8 @@ document.addEventListener('click', async e => {
       location.href = '/api/export?deckId=' + encodeURIComponent(id);
     }
     else if (a === 'delete-deck' || a === 'delete-deck-prompt') await deleteDeckPrompt(id);
+    else if (a === 'reset-deck-prompt') await resetDeckPrompt(id);
+    else if (a === 'reset-all-prompt') await resetAllPrompt();
     else if (a === 'delete-card') await confirmDelete('card', id);
     else if (a === 'confirm-delete') {
       if (busy) return;
@@ -4374,15 +4499,14 @@ else if(form.id==='firebase-auth-form'){
   }
   modal.close();
   await syncFromCloudIfAvailable();
+  await loadAccessInfo();
   await refresh();
 }
 else if(form.id==='drive-auth-form'){
-  const email = values.email?.trim();
-  const clientId = values.clientId?.trim();
-  if (clientId && window.LumcardsSync?.drive) {
-    window.LumcardsSync.drive.clientId = clientId;
-  }
-  await window.LumcardsSync?.drive?.signIn(email);
+  const drive = window.LumcardsSync?.drive;
+  if (!drive) throw new Error('Google Drive no está disponible. Recarga la aplicación.');
+  const result = await drive.signIn();
+  if (!result?.success) throw new Error('No se completó la conexión a Google Drive.');
   modal.close();
   render();
   toast('¡Google Drive conectado correctamente!');
@@ -4392,12 +4516,23 @@ async function handleStudyKey(code,key){if(busy||modal.open||view!=='study'||!cu
 document.addEventListener('keydown',e=>{AudioController.unlock();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#global-search')?.focus();return;}if(modal.open){if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){const subBtn=modal.querySelector('button.btn-primary, button[data-mutate]');if(subBtn){e.preventDefault();subBtn.click();return;}}return;}if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||busy)return;if(view==='study'&&currentCard()){const isSpace=e.code==='Space'||e.key===' '||e.key==='Space'||e.code==='Enter'||e.key==='Enter';if(isSpace||/^[1-4]$/.test(e.key)||['f','F','Escape','s','S','e','E','r','R'].includes(e.key)){e.preventDefault();handleStudyKey(e.code,e.key).catch(err=>toast(err.message,true));}}});
 window.addEventListener('message',e=>{const frame=document.querySelector('#study-frame');if(!frame||e.source!==frame.contentWindow)return;const trustedOrigin=e.origin===location.origin||(e.origin==='null'&&frame.hasAttribute('srcdoc'));if(!trustedOrigin)return;AudioController.unlock();if(e.data){if(e.data.ankiStopAudio){AudioController.stop();}else if(e.data.ankiPlayAudio){AudioController.playSingle(e.data.ankiPlayAudio);const aud=AudioController.currentAudio;if(aud){const origEnd=aud.onended,origErr=aud.onerror;const notify=()=>{try{frame.contentWindow.postMessage({ankiAudioEnded:true},location.origin);}catch{}};aud.onended=()=>{if(origEnd)origEnd();notify();};aud.onerror=()=>{if(origErr)origErr();notify();};};}else if(e.data.ankiCardClick){if(view==='study'&&!revealed&&currentCard()){revealed=true;render();}}else if(e.data.ankiKey||e.data.ankiCode){handleStudyKey(e.data.ankiCode,e.data.ankiKey).catch(err=>toast(err.message,true));}}});
 modal.addEventListener('click',e=>{if(e.target===modal){const r=modal.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)modal.close();}});
-modal.addEventListener('close',()=>{modal.className='';});
+modal.addEventListener('close',()=>{
+  // A queued close from the previous dialog must not reset a newly opened one.
+  if(modal.open)return;
+  modal.className="";
+  if(modalReturnFocus?.isConnected)modalReturnFocus.focus();
+  else if(modalReturnFocus?.dataset?.action){
+    const {action,id,view:targetView}=modalReturnFocus.dataset;
+    const selector=`[data-action="${CSS.escape(action)}"]${id?`[data-id="${CSS.escape(id)}"]`:''}${targetView?`[data-view="${CSS.escape(targetView)}"]`:''}`;
+    (document.querySelector(selector)||$('#main'))?.focus();
+  }else $('#main')?.focus();
+});
 async function boot(){
   try{
     if (window.LumcardsSync) {
       window.LumcardsSync.init();
       await syncFromCloudIfAvailable();
+      await loadAccessInfo();
     }
     await refresh();
   }catch(error){
@@ -4548,7 +4683,7 @@ async function templateEditorModal() {
         </button>
       </div>
     </div>
-  `);
+  `, 'dialog-card-styler');
 
   setTimeout(() => {
     const updatePreviewUI = () => {

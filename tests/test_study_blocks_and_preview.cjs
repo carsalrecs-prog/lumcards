@@ -259,7 +259,7 @@ const assert = require('node:assert/strict');
     // Primera tarjeta: revelar y calificar "Otra vez" (rating 1)
     await page.locator('[data-action="reveal"]').click();
     await page.locator('.anki-rate-button.rate-col-1').click();
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => { const t=document.querySelector('.anki-topbar')?.textContent || ''; return t.includes('1 repasadas') && t.includes('19 pendientes'); }, {}, {timeout:10000});
 
     // Tras calificar "Otra vez":
     // La tarjeta pasa a estar repasada en el bloque (repasadas = 1, pendientes = 19)

@@ -95,6 +95,14 @@ foreach ($jsonFile in @('app.json', 'templates.json', 'graph.json')) {
         Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $project ".obsidian/$jsonFile") | ConvertFrom-Json | Out-Null
     } catch { $problems.Add("Configuracion Obsidian invalida: $jsonFile") }
 }
+$ps1Files = @(Get-ChildItem -LiteralPath $project -Filter '*.ps1' -Recurse | Where-Object { $_.FullName -notmatch '\\(\.venv|dist|android|vendor)\\' })
+foreach ($ps1 in $ps1Files) {
+    $tokens = $null; $errors = $null
+    $null = [System.Management.Automation.Language.Parser]::ParseFile($ps1.FullName, [ref]$tokens, [ref]$errors)
+    if ($errors.Count -gt 0) {
+        $problems.Add("Error de sintaxis de PowerShell en $($ps1.Name): $($errors[0].Message)")
+    }
+}
 if ($problems.Count -gt 0) { throw ($problems -join [Environment]::NewLine) }
 [pscustomobject]@{
     Status = 'OK'

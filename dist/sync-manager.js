@@ -60,99 +60,95 @@
   const GoogleDriveProvider = {
     name: 'gdrive',
     label: 'Google Drive Personal del Usuario',
-    clientId: '782910482910-lumcards-drive.apps.googleusercontent.com', // Placeholder ampliable
+    // Public OAuth client ID, supplied by deployment configuration; never a client secret.
+    clientId: '',
     folderName: 'Lumcards Mazos y Estudio',
     token: null,
     user: null,
+    expiresAt: 0,
+    authGeneration: 0,
 
     init() {
+      // Retire legacy persistent/simulated credentials. OAuth tokens stay in memory.
       try {
-        this.token = localStorage.getItem(STORAGE_KEYS.DRIVE_TOKEN);
-        const userRaw = localStorage.getItem(STORAGE_KEYS.DRIVE_USER);
-        if (userRaw) this.user = JSON.parse(userRaw);
+        localStorage.removeItem(STORAGE_KEYS.DRIVE_TOKEN);
+        localStorage.removeItem(STORAGE_KEYS.DRIVE_USER);
       } catch (_) {}
     },
 
     isConnected() {
       this.init();
-      return Boolean(this.token);
+      if (this.token && Date.now() >= this.expiresAt) this.disconnect();
+      return Boolean(this.token && this.user);
     },
 
     getUser() {
-      this.init();
-      return this.user;
+      return this.isConnected() ? this.user : null;
     },
 
-    // Iniciar sesión con Google Identity Services (GIS) o correo
-    async signIn(customTokenOrEmail) {
-      if (customTokenOrEmail && String(customTokenOrEmail).includes('@')) {
-        const email = String(customTokenOrEmail).trim();
-        this.user = { name: email.split('@')[0], email: email };
-        this.token = this.token || 'drive_token_' + Date.now();
-        localStorage.setItem(STORAGE_KEYS.DRIVE_USER, JSON.stringify(this.user));
-        localStorage.setItem(STORAGE_KEYS.DRIVE_TOKEN, this.token);
-        return { success: true, user: this.user, token: this.token };
+    async signIn() {
+      this.disconnect();
+      const generation = this.authGeneration;
+      const clientId = this.clientId || (typeof window !== 'undefined' && window.LUMCARDS_DRIVE_CLIENT_ID);
+      if (!clientId || !/^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/i.test(clientId)) {
+        throw new Error('Google Drive todavía no está configurado en esta instalación.');
       }
-
-      if (customTokenOrEmail) {
-        this.token = customTokenOrEmail;
-        localStorage.setItem(STORAGE_KEYS.DRIVE_TOKEN, customTokenOrEmail);
-      }
-
-      // Si Google Identity Services está disponible en ventana y cliente configurado
-      if (typeof window !== 'undefined' && window.google?.accounts?.oauth2 && this.clientId && !this.clientId.includes('apps.googleusercontent.com')) {
-        return new Promise((resolve, reject) => {
-          const client = window.google.accounts.oauth2.initTokenClient({
-            client_id: this.clientId,
-            scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
-            callback: async (tokenResponse) => {
-              if (tokenResponse.error) {
-                reject(new Error(tokenResponse.error));
-                return;
+      const oauth = typeof window !== 'undefined' && window.google?.accounts?.oauth2;
+      if (!oauth) throw new Error('No se pudo cargar Google. Comprueba tu conexión y vuelve a intentarlo.');
+      return new Promise((resolve, reject) => {
+        const client = oauth.initTokenClient({
+          client_id: clientId,
+          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+          error_callback: () => reject(new Error('No se completó la autorización de Google. Vuelve a conectar Drive.')),
+          callback: async (response) => {
+            try {
+              if (generation !== this.authGeneration) throw new Error('Conexión cancelada.');
+              if (response.error || !response.access_token || !(Number(response.expires_in) > 0)) {
+                throw new Error('Google no autorizó la conexión a Drive.');
               }
-              this.token = tokenResponse.access_token;
-              localStorage.setItem(STORAGE_KEYS.DRIVE_TOKEN, this.token);
-
-              // Obtener perfil del usuario
-              try {
-                const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                  headers: { Authorization: `Bearer ${this.token}` }
-                });
-                if (userRes.ok) {
-                  this.user = await userRes.json();
-                  localStorage.setItem(STORAGE_KEYS.DRIVE_USER, JSON.stringify(this.user));
-                }
-              } catch (_) {}
-
-              resolve({ success: true, user: this.user, token: this.token });
-            }
-          });
-          client.requestAccessToken();
+              const scopes = String(response.scope || '').split(/\s+/);
+              if (!scopes.includes('https://www.googleapis.com/auth/drive.file')) {
+                throw new Error('Se necesita permiso para gestionar las copias de Lumcards en Drive.');
+              }
+              const expiresAt = Date.now() + Number(response.expires_in) * 1000;
+              const profile = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${response.access_token}` }
+              });
+              if (!profile.ok) throw new Error('No se pudo verificar la cuenta de Google.');
+              const user = await profile.json();
+              if (!user.email) throw new Error('Google no devolvió el correo de la cuenta.');
+              if (generation !== this.authGeneration) throw new Error('Conexión cancelada.');
+              this.token = response.access_token;
+              this.expiresAt = expiresAt;
+              this.user = user;
+              resolve({ success: true, user });
+            } catch (error) { reject(error); }
+          }
         });
-      }
-
-      // Modo conectado por defecto
-      if (this.token || this.user) {
-        return { success: true, user: this.user || { name: 'Usuario de Google Drive', email: 'usuario@gmail.com' }, token: this.token || 'mock_token' };
-      }
-
-      this.user = { name: 'Usuario de Google Drive', email: 'usuario@gmail.com' };
-      this.token = 'drive_token_' + Date.now();
-      localStorage.setItem(STORAGE_KEYS.DRIVE_USER, JSON.stringify(this.user));
-      localStorage.setItem(STORAGE_KEYS.DRIVE_TOKEN, this.token);
-      return { success: true, user: this.user, token: this.token };
+        client.requestAccessToken();
+      });
     },
 
-    signOut() {
-      return this.disconnect();
-    },
+    signOut() { return this.disconnect(); },
 
     disconnect() {
+      this.authGeneration++;
       this.token = null;
       this.user = null;
-      localStorage.removeItem(STORAGE_KEYS.DRIVE_TOKEN);
-      localStorage.removeItem(STORAGE_KEYS.DRIVE_USER);
+      this.expiresAt = 0;
+      this.init();
       return { success: true };
+    },
+
+    async authorizedFetch(url, options = {}) {
+      if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
+      const token = this.token;
+      const response = await fetch(url, { ...options, headers: { ...options.headers, Authorization: `Bearer ${token}` } });
+      if (response.status === 401) {
+        if (this.token === token) this.disconnect();
+        throw new Error('La autorización de Google Drive caducó. Vuelve a conectar tu cuenta.');
+      }
+      return response;
     },
 
     uploadDeck(blob, filename) {
@@ -169,9 +165,9 @@
 
     // Buscar o crear carpeta de Lumcards en el Drive del usuario
     async getOrCreateFolder() {
-      if (!this.token) throw new Error('No has conectado tu Google Drive.');
+      if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and name = '${this.folderName}' and trashed = false`);
-      const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+      const searchRes = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
         headers: { Authorization: `Bearer ${this.token}` }
       });
       if (!searchRes.ok) throw new Error('No se pudo acceder a Google Drive. Puede que el token haya expirado.');
@@ -181,7 +177,7 @@
       }
 
       // Crear la carpeta
-      const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      const createRes = await this.authorizedFetch('https://www.googleapis.com/drive/v3/files', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.token}`,
@@ -201,7 +197,8 @@
     // Subir respaldo o paquete de mazo al Drive del usuario
     async uploadDeckPackage(filename, contentBlob, description = 'Respaldo de Lumcards') {
       // Si el usuario tiene un token real de Google OAuth
-      if (this.token && !this.token.startsWith('drive_token_') && !this.token.startsWith('mock_')) {
+      if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
+      {
         const folderId = await this.getOrCreateFolder();
         const metadata = {
           name: filename,
@@ -213,7 +210,7 @@
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', contentBlob);
 
-        const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime', {
+        const res = await this.authorizedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime', {
           method: 'POST',
           headers: { Authorization: `Bearer ${this.token}` },
           body: form
@@ -223,41 +220,15 @@
         return await res.json();
       }
 
-      // Modo transparente sin llaves de desarrollo (Zero-Friction / User Owned)
-      // Guarda registro en historial y genera descarga directa para que el usuario guarde en su carpeta de Drive o disco
-      try {
-        const raw = localStorage.getItem('lumcards_drive_backups');
-        const backups = raw ? JSON.parse(raw) : [];
-        const item = {
-          id: 'b_' + Date.now(),
-          name: filename,
-          size: contentBlob.size || 18500,
-          modifiedTime: new Date().toISOString()
-        };
-        backups.unshift(item);
-        localStorage.setItem('lumcards_drive_backups', JSON.stringify(backups.slice(0, 30)));
-
-        if (typeof window !== 'undefined' && window.document) {
-          const url = URL.createObjectURL(contentBlob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 500);
-        }
-        return { ...item, downloaded: true };
-      } catch (err) {
-        return { success: true, name: filename, fallback: true };
-      }
     },
 
     // Listar mazos disponibles en la carpeta de Drive
     async listCloudDecks() {
-      if (this.token && !this.token.startsWith('drive_token_') && !this.token.startsWith('mock_')) {
+      if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
+      {
         const folderId = await this.getOrCreateFolder();
         const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime,mimeType)&orderBy=modifiedTime desc`, {
+        const res = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime,mimeType)&orderBy=modifiedTime desc`, {
           headers: { Authorization: `Bearer ${this.token}` }
         });
         if (!res.ok) throw new Error('No se pudieron listar los mazos en Google Drive.');
@@ -265,37 +236,38 @@
         return data.files || [];
       }
 
-      // Historial de respaldos de Drive guardados por el usuario
-      const raw = localStorage.getItem('lumcards_drive_backups');
-      const list = raw ? JSON.parse(raw) : [];
-      if (list.length > 0) return list;
-      return [
-        { id: 'deck_actual', name: 'Respaldo_Colección_Lumcards.colpkg', size: 19200, modifiedTime: new Date().toISOString() }
-      ];
     },
 
     // Descargar un mazo de Google Drive
     async downloadCloudDeck(fileId) {
-      if (this.token && !this.token.startsWith('drive_token_') && !this.token.startsWith('mock_')) {
-        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
+      {
+        const res = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
           headers: { Authorization: `Bearer ${this.token}` }
         });
         if (!res.ok) throw new Error('No se pudo descargar el archivo de Google Drive.');
         return await res.blob();
       }
 
-      // Devolver copia del almacenamiento web para restaurar
-      const rawWeb = localStorage.getItem('lumcards_web_data') || '{}';
-      return new Blob([rawWeb], { type: 'application/json' });
     }
   };
 
   // ── 3. Proveedor de Firebase (Cloud Sync & Auth) ─────────────
+  // Correo(s) con acceso total de administrador: aprueban/revocan el acceso
+  // de otros usuarios (flujo de pago manual por Yape). Ver brain/03_DECISIONS.md
+  // "Modelo de negocio: acceso pago manual + tienda de mazos" en el repositorio Lumcards.
+  const ADMIN_EMAILS = ['carsal.recs@gmail.com'];
+
   const FirebaseProvider = {
     name: 'firebase',
     label: 'Nube Lumcards (Firebase)',
     user: null,
     config: null,
+    access: null, // { approved, isAdmin, pending, note } — cache del último checkAccess()
+
+    isAdminEmail(email) {
+      return ADMIN_EMAILS.includes(String(email || '').toLowerCase().trim());
+    },
 
     init() {
       try {
@@ -319,15 +291,22 @@
     },
 
     getConfig() {
-      this.init();
+      // Reading configuration must not initialize the SDK: init() calls this method.
+      if (!this.config) {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEYS.FIREBASE_CONFIG);
+          if (saved) this.config = JSON.parse(saved);
+        } catch (_) {}
+      }
       return this.config || {
         apiKey: "AIzaSyBw6a1fhczXknvFTYhVoPh8-gkOmxlWXA0",
         authDomain: "lumcards.firebaseapp.com",
+        databaseURL: "https://lumcards-default-rtdb.firebaseio.com",
         projectId: "lumcards",
         storageBucket: "lumcards.firebasestorage.app",
         messagingSenderId: "702374747374",
-        appId: "1:702374747374:web:4b4e19167b05a10411a7ff",
-        measurementId: "G-3GRLS9EHY9"
+        appId: "1:702374747374:web:9bc56c595e5b2bf511a7ff",
+        measurementId: "G-S6BLY1XT49"
       };
     },
 
@@ -561,6 +540,100 @@
       this.user = { uid: 'guest_' + Date.now(), email: 'invitado@lumcards.local', name: 'Estudiante Invitado' };
       localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
       return { success: true, user: this.user };
+    },
+
+    // ── Control de acceso (aprobación manual, pago por Yape) ────
+    // Crea/actualiza el registro de acceso del usuario actual en Firestore
+    // (users/{uid}). El administrador queda aprobado automáticamente;
+    // cualquier otra cuenta nueva entra en estado pendiente hasta que el
+    // administrador la apruebe manualmente desde el panel.
+    async ensureAccessRecord() {
+      this.init();
+      if (!this.user || !this.user.uid || this.user.isLocalSession || this.user.email === 'invitado@lumcards.local') return null;
+      const isAdmin = this.isAdminEmail(this.user.email);
+
+      if (typeof window !== 'undefined' && window.firebase?.firestore) {
+        try {
+          const db = window.firebase.firestore();
+          const ref = db.collection('users').doc(this.user.uid);
+          const snap = await ref.get();
+          const existing = snap.exists ? snap.data() : null;
+          const payload = {
+            email: this.user.email || '',
+            name: this.user.name || '',
+            isAdmin,
+            accessApproved: isAdmin ? true : Boolean(existing?.accessApproved),
+            accessRequestedAt: existing?.accessRequestedAt || new Date().toISOString()
+          };
+          await ref.set(payload, { merge: true });
+          this.access = {
+            approved: payload.accessApproved,
+            isAdmin,
+            pending: !payload.accessApproved,
+            note: existing?.accessNote || ''
+          };
+          return this.access;
+        } catch (err) {
+          console.warn('No se pudo verificar el acceso en Firestore:', err);
+        }
+      }
+
+      // Sin Firestore disponible (entorno de pruebas / offline): admin
+      // siempre aprobado, cualquier otra cuenta queda marcada pendiente
+      // en localStorage para no bloquear el desarrollo local.
+      const key = `lumcards_access_${this.user.uid}`;
+      const raw = localStorage.getItem(key);
+      const existing = raw ? JSON.parse(raw) : null;
+      const record = { approved: isAdmin ? true : Boolean(existing?.approved), isAdmin, pending: false, note: existing?.note || '' };
+      record.pending = !record.approved;
+      localStorage.setItem(key, JSON.stringify(record));
+      this.access = record;
+      return record;
+    },
+
+    // Devuelve el estado de acceso actual (usa la caché si ya se calculó
+    // en esta sesión; si no, lo calcula).
+    async checkAccess() {
+      this.init();
+      if (!this.user) return { approved: false, isAdmin: false, pending: false, noUser: true };
+      if (this.user.isLocalSession || this.user.email === 'invitado@lumcards.local') {
+        return { approved: true, isAdmin: false, pending: false, localOnly: true };
+      }
+      if (this.access) return this.access;
+      return this.ensureAccessRecord();
+    },
+
+    isAdmin() {
+      this.init();
+      return Boolean(this.user && this.isAdminEmail(this.user.email));
+    },
+
+    // Lista todos los usuarios registrados (solo funciona si las reglas de
+    // Firestore permiten `list` en /users al correo administrador).
+    async listAllUsers() {
+      if (!this.isAdmin()) throw new Error('Solo el administrador puede ver la lista de usuarios.');
+      if (typeof window === 'undefined' || !window.firebase?.firestore) {
+        throw new Error('Firestore no está disponible en este entorno.');
+      }
+      const db = window.firebase.firestore();
+      const snap = await db.collection('users').orderBy('accessRequestedAt', 'desc').get();
+      return snap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+    },
+
+    // Aprueba o revoca el acceso de un usuario específico.
+    async setUserAccess(uid, approved, note = '') {
+      if (!this.isAdmin()) throw new Error('Solo el administrador puede aprobar o revocar acceso.');
+      if (typeof window === 'undefined' || !window.firebase?.firestore) {
+        throw new Error('Firestore no está disponible en este entorno.');
+      }
+      const db = window.firebase.firestore();
+      await db.collection('users').doc(uid).set({
+        accessApproved: Boolean(approved),
+        accessNote: note || '',
+        accessUpdatedAt: new Date().toISOString(),
+        accessUpdatedBy: this.user?.email || ''
+      }, { merge: true });
+      return { success: true };
     }
   };
 

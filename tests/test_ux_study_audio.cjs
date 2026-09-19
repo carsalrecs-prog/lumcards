@@ -247,7 +247,8 @@ class FakeAudio {
   assert.doesNotMatch(practiceCss, /padding:\s*7px 16px/, 'Incompatible padding rule should not exist');
   
   const practiceHtml = fs.readFileSync(path.join(root, 'dist/practice.html'), 'utf8');
-  assert.match(practiceHtml, /anki2-theme.*dark/, 'practice.html must sync dark theme');
+  assert.match(practiceHtml, /client-startup\.js/, 'practice.html must load theme startup');
+  assert.match(fs.readFileSync(path.join(root, 'dist/client-startup.js'), 'utf8'), /anki2-theme.*dark/, 'Startup must restore the saved dark theme');
   
   const appSource = fs.readFileSync(path.join(root, 'dist/app.js'), 'utf8');
   assert.doesNotMatch(appSource, /<span>Audio<\/span>/, 'No visible Audio text should remain');
@@ -268,8 +269,16 @@ class FakeAudio {
 // ── Test 6: Juegos dark theme sync ──────────────────────────────
 {
   const practiceHtml = fs.readFileSync(path.join(root, 'dist/practice.html'), 'utf8');
-  assert.match(practiceHtml, /anki2-theme.*dark/, 'practice.html must sync dark theme from localStorage');
-  assert.match(practiceHtml, /classList\.add\('dark'\)/, 'practice.html must add dark class');
+  assert.match(practiceHtml, /client-startup\.js/, 'Practice must load the local theme bootstrap');
+  const startup = fs.readFileSync(path.join(root, 'dist/client-startup.js'), 'utf8');
+  for (const savedTheme of ['dark','light']) {
+    let applied;
+    require('node:vm').runInNewContext(startup, {
+      document: { documentElement: { classList: { toggle: (name, value) => { assert.equal(name, 'dark'); applied = value; } } } },
+      localStorage: { getItem: key => { assert.equal(key, 'anki2-theme'); return savedTheme; } }, navigator: {}, window: {}
+    });
+    assert.equal(applied, savedTheme === 'dark', 'Bootstrap must apply the saved theme before rendering');
+  }
 
   const practiceCss = fs.readFileSync(path.join(root, 'dist/practice.css'), 'utf8');
   assert.match(practiceCss, /min-height:\s*100dvh/, 'practice.css must set 100dvh on html/body');
@@ -283,19 +292,22 @@ class FakeAudio {
   const indexHtml = fs.readFileSync(path.join(root, 'dist/index.html'), 'utf8');
   const practiceHtml = fs.readFileSync(path.join(root, 'dist/practice.html'), 'utf8');
 
-  // SW cache name should be updated
-  assert.match(sw, /20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'SW CACHE_NAME should include 20260917-csp, blocks, import-menus, practice-folders, web-study-blocks or web-stats');
+  // SW cache name should be updated to studio-workspace
+  assert.match(sw, /20260918-studio-workspace/, 'SW CACHE_NAME should include 20260918-studio-workspace');
   // index.html references should match
-  assert.match(indexHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference app.css?v=20260917');
-  assert.match(indexHtml, /student\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference student.css?v=20260917');
-  assert.match(indexHtml, /app\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'index.html should reference app.js?v=20260917');
+  assert.match(indexHtml, /app\.css\?v=20260918-studio-workspace/, 'index.html should reference app.css?v=20260918-studio-workspace');
+  assert.match(indexHtml, /student\.css\?v=20260918-studio-workspace/, 'index.html should reference student.css?v=20260918-studio-workspace');
+  assert.match(indexHtml, /app\.js\?v=20260918-studio-workspace/, 'index.html should reference app.js?v=20260918-studio-workspace');
 
-  assert.match(practiceHtml, /app\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference app.css?v=20260917');
-  assert.match(practiceHtml, /practice\.css\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference practice.css?v=20260917');
-  assert.match(practiceHtml, /practice\.js\?v=20260917-(csp|blocks|import-menus|practice-folders|web-study-blocks|web-stats)/, 'practice.html should reference practice.js?v=20260917');
+  assert.match(practiceHtml, /app\.css\?v=20260918-studio-workspace/, 'practice.html should reference app.css?v=20260918-studio-workspace');
+  assert.match(practiceHtml, /practice\.css\?v=20260918-studio-workspace/, 'practice.html should reference practice.css?v=20260918-studio-workspace');
+  assert.match(practiceHtml, /practice\.js\?v=20260918-studio-workspace/, 'practice.html should reference practice.js?v=20260918-studio-workspace');
 
-  assert.match(indexHtml, /updateViaCache:\s*'none'/, 'index.html must bypass HTTP cache when updating the service worker');
-  assert.match(practiceHtml, /updateViaCache:\s*'none'/, 'practice.html must bypass HTTP cache when updating the service worker');
+  const startup = fs.readFileSync(path.join(root, 'dist/client-startup.js'), 'utf8');
+  assert.match(indexHtml, /src="\/client-startup\.js\?v=/, 'Index must load the CSP-compatible startup script');
+  assert.match(practiceHtml, /src="\/client-startup\.js\?v=/, 'Practice must load the CSP-compatible startup script');
+  assert.match(startup, /updateViaCache:\s*'none'/, 'index.html must bypass HTTP cache when updating the service worker');
+  assert.match(startup, /registration\.update\(\)/, 'Startup must request a fresh service worker');
   assert.match(sw, /event\.request\.mode\s*===\s*'navigate'/, 'SW must use a dedicated network-first path for HTML navigations');
 
 }

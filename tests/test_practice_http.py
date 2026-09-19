@@ -261,14 +261,16 @@ class PracticeHTTPTests(unittest.TestCase):
     def test_07_practice_assets_are_served_locally(self):
         page = self.request("/practice.html", raw=True).decode("utf-8")
         self.assertIn('lang="es"', page)
-        self.assertIn('src="/study-games.js?v=20260917-web-stats"', page)
-        self.assertIn('src="/practice.js?v=20260917-web-stats"', page)
-        for route in ("/practice.css?v=20260917-web-stats", "/practice.js?v=20260917-web-stats", "/study-games.js?v=20260917-web-stats"):
+        self.assertIn('src="/study-games.js?v=20260918-studio-workspace-r2"', page)
+        self.assertIn('src="/practice.js?v=20260918-studio-workspace-r2"', page)
+        for route in ("/practice.css?v=20260918-studio-workspace-r2", "/practice.js?v=20260918-studio-workspace-r2", "/study-games.js?v=20260918-studio-workspace-r2"):
             with self.subTest(route=route):
                 content, headers = self.request(route, raw=True, include_headers=True)
                 self.assertGreater(len(content), 50)
                 self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
                 self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+                self.assertIn("https://accounts.google.com", headers["Content-Security-Policy"])
+                self.assertIn("https://www.googleapis.com", headers["Content-Security-Policy"])
 
 
 if __name__ == "__main__":

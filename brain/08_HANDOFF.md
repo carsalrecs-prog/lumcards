@@ -1,50 +1,44 @@
 ---
+---
 tags: [lumcards, relevo]
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 
 # Relevo actual
 
 ## Control
-- Agente: Antigravity.
-- Actualizado: 2026-09-18T01:12:00-05:00.
-- Estado: hecha.
-- Tarea: [[tasks/2026-09-18-0105-antigravity-subir-cambios-web-vercel-github]].
-- Entorno: D:\CODEX, main rama, commit `2ca8ba3` sincronizado con `origin/main` (`https://github.com/carsalrecs-prog/lumcards.git`). Desplegado en vivo en `https://lumcards.vercel.app`.
+- Estado: lista_para_relevo.
+- Agente: Antigravity; actualizado 2026-09-19T13:21:00-05:00.
+- Entorno: D:\CODEX, main, base 66227af; cambios integrados y sincronizados a GitHub.
+- Ficha vigente: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]]. Tarea anterior: [[tasks/2026-09-19-1207-codex-completar-drive-real]]. Nube anterior: [[tasks/2026-09-19-0502-codex-validar-nube]]. Web reparada: [[tasks/2026-09-18-2133-codex-reparar-persistencia-web]].
+- Ficha anterior: [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]] (hecha: formulas locales).
+- Ficha previa: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Historial visual: [[tasks/2026-09-18-1426-antigravity-redisenar-resto-aplicacion]].
 
 ## Hecho
-- **Publicación y despliegue web completados ([[tasks/2026-09-18-0105-antigravity-subir-cambios-web-vercel-github]])**:
-  - Commit `2ca8ba3` subido exitosamente a GitHub (`origin/main`).
-  - Verificado despliegue en producción en Vercel (`https://lumcards.vercel.app` y `https://lumcards.vercel.app/practice`).
-  - Incluye:
-    1. Rediseño integral Studio (Biblioteca y navegación, Estudio y visor de tarjetas, Modales, Explorador de tarjetas y Estadísticas).
-    2. Mejoras de arranque de escritorio (`start.ps1`, `server.py`, `launcher.cs`).
-    3. Coherencia matemática y robustez offline en modo web (`test_web_stats.cjs`).
-    4. Cierre de diseño de juegos de Codex.
-    5. Paridad estricta 0-diff entre `dist/` y `docs/`.
-    6. 4 nuevas suites automatizadas de pruebas en Chromium.
-- **Diagnóstico y resolución de error de arranque en Lumcards.exe ([[tasks/2026-09-18-0050-antigravity-diagnostico-arranque-escritorio]])**:
-  - Mitigaciones aplicadas y servidor local PID 23168 sano y activo con 3.972 tarjetas intactas.
+- Drive real completo: API habilitada; cliente OAuth público integrado sin secretos; orígenes y permisos mínimos guardados. Autorización, subida, listado, descarga e importación reales PASS con copia sintética de 4 KB; retirada por Richard y carpeta verificada vacía. Código/cache r7 local sin publicar.
+- Reglas anteriores permitian autoaprobacion al crear documento: reproducido. Borrador local corregido pasa cuatro casos del simulador real (autoaprobacion denegada, pendiente permitido, admin sin verificar denegado/verificado permitido). Reglas publicadas con permiso expreso: CLI exit 0; sin escribir documentos.
+- Reparacion funcional web separada autorizada al continuar: los 4 fallos conocidos ahora pasan. Error local no anuncia guardado ni programa subida; formato ilegible preservado; fechas locales y timestamps string normalizados solo al calcular. Error/reintento de estadisticas sin bucle y con foco recuperado.
+- KaTeX local del repositorio reemplaza CDN en ambos HTML; cache r4 incluye fuentes/scripts. 24 checks Chromium reales, preview offline y prueba cache PWA PASS, capturas inspeccionadas. Sin dependencias nuevas ni cambios CSP.
+- Studio aplicado a Mi espacio/cuenta/copias/ajustes, importadores/editor y estados/confirmaciones. Preview sin guardar/audio; nombres largos y retorno de foco corregidos. Biblioteca/Estudio/Juegos conservados, reflow puntual en estadísticas.
+- Administración/reset añadidos por Claude revisados; revocación y aprobación con confirmación y error recuperable. Usuario confirmó que Claude se quedó sin tokens; cambios preservados.
+- dist/docs espejados, version actual app/sync/cache r6. Startup externo compatible con CSP y cache PWA verificada con servidor aislado.
+- No cierre integral: quedan las limitaciones funcionales/de validación de abajo. No empaquetado, instalado, publicado ni push.
 
 ## Validación
-- `curl.exe http://127.0.0.1:8765/api/health`: 200 OK (`app: lumcards`, `ok: true`).
-- `curl.exe http://127.0.0.1:8765/api/state`: 200 OK (3.972 tarjetas, racha 4 días, estadísticas completas).
-- `tools/build-desktop.ps1 -StageOnly`: PASS.
-- `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py"`: PASS (92 pruebas en 17.8s, OK).
-- Paridad `dist/` vs `docs/`: 0 diff verificado en `student.css`, `app.css`.
-
-## Contexto ajeno preservado
-- Diseño de Jugar y aprender (Studio) completado por Codex en [[tasks/2026-09-17-2300-codex-cierre-diseno]]: 100% conservado.
-- Etapas 1, 2 y 3 ([[tasks/2026-09-17-2315-antigravity-redinseo-biblioteca-navegacion]], [[tasks/2026-09-17-2337-antigravity-estudio-visor-tarjetas-studio]], [[tasks/2026-09-18-0020-antigravity-explorador-modales-estadisticas-studio]]): 100% conservadas.
-- Base de datos SQLite y datos del usuario intactos bajo `data/`.
+- Sesion Drive: contratos Drive/Sync/Firebase PASS, 17 pruebas Python OK, PWA cache r7 y access 169 checks PASS. Paridad dist/docs 6/6 y diff check PASS. Transferencia remota real comprobada con datos sintéticos.
+- Historico conservado en fichas: 9 escenarios de persistencia + PWA offline, remaining 567 checks, 11 suites frontend y 93 pruebas Python PASS. No repetidos todos en esta sesion.
+- Check-brain PASS: 61 notas, 224 enlaces y 43 fichas.
 
 ## Pendiente
-- El usuario puede pulsar "Volver a intentar" en la ventana de Lumcards abierta para continuar de inmediato.
-- Opcionales restantes según el plan maestro: Etapa 4 (Mi espacio, ajustes y sincronización) o cierre de rediseño.
+- Cola de sincronizacion offline no implementada; persistencia local probada no equivale a sincronizacion remota. Los 4 defectos de la ficha 2316 quedan corregidos localmente, no publicados.
+- Claude implementó acceso manual: [[tasks/2026-09-18-2130-claude-control-acceso-manual]]. Reglas corregidas publicadas. Falta probar registro → aprobación → acceso con cuentas de prueba y completar control de acceso pago a datos. Drive ya fue probado; transferencia Firebase integral no.
+- Reset y hallazgo de backend web Firestore: [[tasks/2026-09-18-1600-codex-web-backend-solution]], [[tasks/2026-09-18-1524-codex-estadisticas-lenguaje-reset]]. Revisar [[03_DECISIONS]] antes de retomar propuesta Vercel/Realtime DB.
+- Visión comercial, catálogo sin inventario y licencias pendientes permanecen en [[02_NEXT]] y [[03_DECISIONS]]. No iniciar tienda ni publicar por esta tarea.
+- Reparación reciente de escritorio preservada: [[tasks/2026-09-18-1346-antigravity-reparar-arranque-escritorio]].
 
 ## Primer paso
-- Indicar al usuario la solución inmediata (hacer clic en "Volver a intentar") y el diagnóstico completado.
+- Probar registro → aprobación → acceso con cuentas de prueba y diseñar control de acceso pago a datos. No desplegar hosting ni iniciar tienda por inferencia; los cambios locales acumulados siguen sin commit/publicación.
 
 ## Bloqueos y procesos
-- Bloqueos: ninguno.
-- Procesos activos: `python.exe` PID 23168 (servidor local en puerto 8765), `Lumcards.exe` PID 13612 (ventana nativa en pantalla).
+- Sin conflicto activo confirmado. Validación integral limitada por Firebase externo y servicios/datos web reales no verificados.
+- Procesos propios de pruebas finalizados; procesos ajenos no intervenidos. Consola cerrada; solo reglas publicadas, no hosting.

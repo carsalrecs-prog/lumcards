@@ -18,3 +18,4 @@ tools/practice-ui-session.json
 .obsidian/cache/
 /*.dll
 tests/screenshots_*/
+.claude/

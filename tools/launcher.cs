@@ -196,27 +196,85 @@ namespace LumcardsDesktop
             if (await IsHealthyAsync()) return;
             if (exitRequested) return;
             if (options.NoServer) throw new InvalidOperationException("El servidor local de prueba no está disponible.");
+
+            // Intento principal: arranque asistido con start.ps1
             string script = Path.Combine(options.AppDir, "start.ps1");
-            if (!File.Exists(script)) throw new FileNotFoundException("Falta start.ps1. Reinstala la aplicación conservando la carpeta data.");
-            ProcessStartInfo start = new ProcessStartInfo {
-                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"),
-                Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" -NoBrowser",
-                WorkingDirectory = options.AppDir, UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden
-            };
-            using (Process process = Process.Start(start))
+            if (File.Exists(script))
             {
-                for (int attempt = 0; attempt < 100; attempt++)
+                ProcessStartInfo start = new ProcessStartInfo {
+                    FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"),
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" -NoBrowser",
+                    WorkingDirectory = options.AppDir, UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden
+                };
+                try
                 {
-                    await Task.Delay(700);
-                    if (await IsHealthyAsync()) return;
-                    if (process.HasExited && process.ExitCode != 0)
+                    using (Process process = Process.Start(start))
                     {
-                        if (await IsHealthyAsync()) return;
-                        throw new InvalidOperationException("No se pudo iniciar la biblioteca. Revisa data\\server-error.log en la carpeta de la aplicación.");
+                        for (int attempt = 0; attempt < 100; attempt++)
+                        {
+                            await Task.Delay(700);
+                            if (await IsHealthyAsync()) return;
+                            if (process.HasExited && process.ExitCode != 0)
+                            {
+                                if (await IsHealthyAsync()) return;
+                                Log("start.ps1 finalizó con código " + process.ExitCode + ". Evaluando fallback directo...");
+                                break;
+                            }
+                        }
                     }
                 }
+                catch (Exception psError)
+                {
+                    Log("No se pudo iniciar powershell: " + psError.Message);
+                }
             }
-            throw new TimeoutException("La biblioteca tarda más de lo esperado. Espera un momento y vuelve a intentarlo.");
+
+            if (await IsHealthyAsync()) return;
+
+            // Fallback de máxima resiliencia: si powershell falló o no pudo arrancar el servidor,
+            // pero el entorno Python local (.venv\Scripts\python.exe) y server.py existen,
+            // arrancamos el servidor backend directamente sin depender de PowerShell.
+            string pythonExe = Path.Combine(options.AppDir, @".venv\Scripts\python.exe");
+            string serverPy = Path.Combine(options.AppDir, "server.py");
+            if (File.Exists(pythonExe) && File.Exists(serverPy))
+            {
+                Log("Iniciando backend mediante fallback directo de Python...");
+                ProcessStartInfo pyStart = new ProcessStartInfo {
+                    FileName = pythonExe,
+                    Arguments = "\"" + serverPy + "\"",
+                    WorkingDirectory = options.AppDir,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                };
+                try
+                {
+                    using (Process pyProcess = Process.Start(pyStart))
+                    {
+                        for (int attempt = 0; attempt < 40; attempt++)
+                        {
+                            await Task.Delay(500);
+                            if (await IsHealthyAsync())
+                            {
+                                Log("Fallback directo de Python exitoso. Servidor listo.");
+                                return;
+                            }
+                            if (pyProcess.HasExited)
+                            {
+                                Log("El proceso de Python en fallback salió con código " + pyProcess.ExitCode);
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception pyError)
+                {
+                    Log("Error en fallback directo de Python: " + pyError.Message);
+                }
+            }
+
+            if (await IsHealthyAsync()) return;
+            throw new InvalidOperationException("No se pudo iniciar la biblioteca. Revisa data\\server-error.log y data\\desktop.log en la carpeta de la aplicación.");
         }
 
         private void OnDownload(object sender, CoreWebView2DownloadStartingEventArgs e)
@@ -362,7 +420,9 @@ namespace LumcardsDesktop
         }
         private void Log(string message)
         {
-            try { string folder = Path.GetDirectoryName(statePath); Directory.CreateDirectory(folder); File.AppendAllText(Path.Combine(folder, "desktop.log"), DateTime.Now.ToString("s") + " " + message + Environment.NewLine); } catch { }
+            string line = DateTime.Now.ToString("s") + " " + message + Environment.NewLine;
+            try { string folder = Path.Combine(options.AppDir, "data"); Directory.CreateDirectory(folder); File.AppendAllText(Path.Combine(folder, "desktop.log"), line); } catch { }
+            try { string folder = Path.GetDirectoryName(statePath); Directory.CreateDirectory(folder); File.AppendAllText(Path.Combine(folder, "desktop.log"), line); } catch { }
         }
         private void Cleanup()
         {

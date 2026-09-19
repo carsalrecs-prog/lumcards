@@ -1,9 +1,90 @@
 ---
 tags: [lumcards, registro]
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 
 # Registro de trabajo
+
+## 2026-09-19 — Codex: OAuth y transferencia Drive real
+
+- Drive API habilitada; cliente OAuth existente integrado sin secretos, orígenes/permisos guardados. Subida, listado, descarga e importación reales PASS con copia sintética de 4 KB; Richard la movió a la papelera y la carpeta quedó vacía. Cinco suites/contratos focales, 17 pruebas Python, PWA r7, 169 checks y paridad dist/docs PASS. Código local sin publicar. [[tasks/2026-09-19-1207-codex-completar-drive-real]]
+
+## 2026-09-19 — Codex: Drive sin exito ficticio
+
+- dist/docs sync-manager y formulario migrados a GIS sin correo/token simulado ni archivos inventados; tokens en memoria, permisos y caducidad comprobados. app/sync/cache r6. Contratos Drive, SyncManager, inicializacion y PWA PASS; falta configuracion y transferencia remota. [[tasks/2026-09-19-1156-codex-drive-oauth]]
+
+## 2026-09-19 — Codex: validacion de nube
+
+- Firebase init recursivo corregido, prueba nueva PASS y cache r5 espejada. Cinco suites PASS; reglas corregidas localmente y cuatro casos esperados del simulador real PASS, sin datos personales ni escrituras. Reglas publicadas con permiso expreso y CLI exit 0; aplicacion sin publicar. Drive OAuth y acceso pago integral pendientes. [[tasks/2026-09-19-0502-codex-validar-nube]].
+
+
+## 2026-09-18 — Codex: reparacion funcional web
+
+- Cuatro fallos corregidos: cuota sin exito falso, JSON ilegible preservado, fechas locales y timestamps string. Error/reintento de estadisticas sin bucle. 9 escenarios Chromium y persistencia offline sintetica PASS; app.js/cache r4 y espejos. [[tasks/2026-09-18-2133-codex-reparar-persistencia-web]]. Sin motor, datos personales ni publicacion.
+
+## 2026-09-18 — Codex: formulas locales Studio
+
+- KaTeX existente reutilizado en HTML y cache math-r3, sin instalar dependencias ni relajar CSP. 24 checks Chromium + cache offline + tres suites PASS. Cuatro defectos funcionales web confirmados, no reparados en este alcance. [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]]. Sin publicar/instalar.
+
+## 2026-09-18 — Codex: Studio restante y revisión de acceso
+
+- Mi espacio, formularios/importadores, confirmaciones accesibles y estados veraces; administración nueva y nombres largos corregidos. dist/docs coherentes, caché r2 y arranque externo servido por desktop. Sin cambios propios de motor, sincronización ni datos.
+- 11 suites frontend y 93 pruebas Python PASS; administración 169 checks Chromium. Recorrido final y detalle en [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Nube real, KaTeX externo bajo CSP y persistencia web offline pendientes. Sin instalación/publicación.
+
+## 2026-09-18 21:30 — Claude: control de acceso manual (admin + aprobación por Yape)
+
+- Visión de negocio de Richard registrada en [[03_DECISIONS]] → "Modelo de negocio: acceso pago manual + tienda de mazos": cobro manual por Yape, correo admin `carsal.recs@gmail.com`, tienda de mazos por carrera (futuro), IA + suscripción mensual (futuro, sin diseño técnico).
+- Implementado (detalle y pruebas en [[tasks/2026-09-18-2130-claude-control-acceso-manual]]): `ADMIN_EMAILS` en `dist/sync-manager.js`, registro de acceso por usuario en Firestore (`users/{uid}.accessApproved`), panel de administración en `dist/app.js` (nav "Administración", listar/aprobar/revocar usuarios), tarjeta de estado de acceso en Preferencias/Sincronización, `firestore.rules` nuevo en la raíz del repo (no desplegado — lo debe hacer el usuario en la consola de Firebase).
+- Probado en navegador con usuarios simulados por consola (invitado, admin, usuario normal) — comportamiento correcto en los tres casos. No probado con login real porque no se sabe si los proveedores de Auth están habilitados ni si las reglas de Firestore ya están desplegadas (pasos que le corresponden a Richard, ver ficha).
+- Diseño defensivo: si Firestore no está disponible o las reglas no están desplegadas, el sistema cae a un estado "pendiente" por defecto (nunca aprueba a nadie por accidente).
+
+## 2026-09-18 21:00 — Claude: botones de reset en UI web/desktop + hallazgo arquitectónico
+
+- Hallazgo clave: la web YA NO depende de que se construyan Funciones Vercel/Firebase RTDB desde cero. `dist/sync-manager.js` ya implementa autenticación Firebase (email, Google, invitado) y sincronización completa vía **Firestore** (`syncFullWorkspace`/`pullFullWorkspace`), y `dist/app.js` ya tiene un modo web 100% funcional sin Python (`webApi()`, estado `isWebMode`) que calcula estadísticas en el cliente. El plan previo en `tasks/2026-09-18-1600-codex-web-backend-solution.md` y `brain/SIGUIENTE_AGENTE_PROMPT.md` (Fases 1-2: Vercel Functions Node.js + Firebase Realtime DB) asumía que nada de esto existía; quedan **superados/no necesarios** salvo que se decida lo contrario.
+- Faltaba lo único pendiente verificado: botones de reset de progreso (mazo individual y colección completa) con modal de confirmación, ausentes tanto en la UI como en las rutas de `webApi()` (`decks/reset`, `reset-all`, y el ya usado pero no implementado `cards/reset`).
+- Implementado en `dist/app.js` (sincronizado a `docs/app.js`):
+  - Rutas `cards/reset`, `decks/reset` (incluye submazos), `reset-all` en `webApi()`, espejando la lógica de `clean_engine.py::reset_deck/reset_all` (estado nuevo, ivl 0, factor/ease 2500, reps 0, lapses 0).
+  - Botón "Reiniciar progreso del mazo" en el menú de opciones de cada mazo y en la barra de acciones del mazo abierto.
+  - Botón "Reiniciar toda la colección" en Preferencias > Zona de riesgo, con checkbox de doble confirmación obligatorio.
+  - Ambos flujos llaman `api('backup')` antes de resetear (igual que el desktop, que llama `engine.backup()`).
+  - Nuevo icono `undo` en el mapa de iconos SVG.
+- Credenciales de Firebase actualizadas en `dist/sync-manager.js` (appId y measurementId reales del proyecto "lumcards" proporcionados por el usuario; databaseURL de RTDB agregado aunque el flujo activo usa Firestore, no RTDB).
+- Pruebas reales: `node --check dist/app.js` y `dist/sync-manager.js` PASS. Servidor estático `python -m http.server 9100 --directory dist` (nueva config `web-static` en `.claude/launch.json`) + navegador embebido: reset de un mazo confirmado (2 nuevas/4 repasadas → 6 nuevas/0 repasadas, el otro mazo intacto) y reset total confirmado (ambos mazos a 0 repasadas). No se probó con datos reales del usuario en `data/` (fuera de alcance, se usaron datos semilla del navegador).
+- Pendiente real: `check-brain.ps1` no ejecutado todavía en esta sesión; suite Python/Powershell no ejecutada (cambios son solo JS de la carpeta web). Offline queue (`STORAGE_KEYS.OFFLINE_QUEUE`) sigue sin implementarse — es aspiracional en el código, no se usa en ningún flujo.
+
+## 2026-09-18 15:45 — Codex: correcciones funcionales de estadísticas (lenguaje y reset)
+
+- Identificados términos confusos en clean_engine.py (línea 1831-1837): "Jóvenes", "Maduras", "Enterradas", "Suspendidas"
+- Reemplazados con descripciones claras: "En estudio avanzado (1-20 días)", "Dominadas (>20 días)", "Pausadas (no incluidas en repaso)", "Ocultas (sin acceso directo)"
+- Implementada funcionalidad de reset:
+  - reset_deck(deck_id): reinicia todas las tarjetas de un mazo a estado 'new'
+  - reset_all(): reinicia todas las tarjetas de la colección
+  - Endpoints HTTP: POST /api/decks/reset y POST /api/reset-all
+- Validación: Python syntax PASS, módulos importan sin errores
+- Pendiente: agregar botones UI en app.js (archivo minificado, requiere edición cuidadosa)
+- APIs funcionales y lista para pruebas
+
+## 2026-09-18 15:10 — Codex: cierre de rediseño Studio Fase D y correcciones de paridad
+
+- Completada auditoría final visual de 8 vistas: Biblioteca, Tarjetas, Estudio, Progreso, Sincronización, Copias, Preferencias, Editor.
+- Verificado en desktop (800×600) y móvil (375×812): sin scroll horizontal, reflow coherente, colores/tipografía Studio, contraste ≥4.5:1.
+- Correcciones: test_ux_study_audio.cjs (versión 20260918-studio-workspace), dist/practice.html y docs/practice.html (paridad de scripts).
+- Todas las suites de regresión PASS (9/9): test_ux_study_audio, preview_legibilidad_verify, import_menus_verify, studio_etapa3_design, library_navigation_design, study_studio_design, practice_studio, study_blocks_and_preview, web_stats.
+- test_studio_remaining_design.cjs (6 tamaños×2 temas×2 presets, 200+ capturas): PASS (exit 0).
+- Archivos modificados: 22 (dist/docs paridad, .claude/launch.json). Cambios sin publicación/instalación.
+- Estado: lista_para_relevo. Relevo en [[08_HANDOFF]].
+
+## 2026-09-18 — Reparación definitiva de arranque de escritorio y blindaje contra regresiones
+
+- Antigravity resolvió el error de pantalla "No se pudo iniciar la biblioteca":
+  1. Causa raíz: En el commit anterior `2ca8ba3`, se omitió un bloque `} catch { }` en el bucle de sondeo de `start.ps1`, lo que impedía a PowerShell parsear el script (`MissingCatchOrFinally`) y abortaba el arranque de Python antes de iniciar.
+  2. Corrección de `start.ps1` y adición de fallback directo a Python en `tools/launcher.cs` (si PowerShell falla o está restringido, `Lumcards.exe` arranca directamente `.venv\Scripts\python.exe server.py`).
+  3. Creación de suite `tests/test_scripts_syntax.py` para parsear automáticamente todos los `.ps1` del repositorio vía el AST oficial de PowerShell.
+  4. Incorporación de verificación obligatoria de scripts `.ps1` en `tools/check-brain.ps1`.
+  5. Actualización y pase exitoso de `tests/test_desktop.ps1` en WebView2.
+  6. Recompilado y desplegado de `Lumcards.exe`.
+- Archivos: `start.ps1`, `tools/launcher.cs`, `tools/check-brain.ps1`, `tests/test_scripts_syntax.py`, `tests/test_desktop.ps1`, `Lumcards.exe`.
+- Validación: 93 pruebas unitarias Python PASS (24.9s), `test_desktop.ps1` PASS (`ready: true`, exit code 0), `check-brain.ps1` Status: OK. Ficha: [[tasks/2026-09-18-1346-antigravity-reparar-arranque-escritorio]].
 
 ## 2026-09-18 — Publicación y despliegue web en producción (GitHub y Vercel)
 
@@ -116,89 +197,5 @@ updated: 2026-09-18
 - Validación: `node tests/test_practice_folder_selection.cjs` PASS (100% OK en los 4 viewports, 18 capturas en `tests/screenshots_practice_folders/`), `test_clean_engine.py` PASS (10/10 OK), `test_practice_http.py` PASS (7/7 OK), `test_import_menus_verify.cjs` PASS, `test_preview_legibilidad_verify.cjs` PASS, `test_ux_study_audio.cjs` PASS.
 - Ficha: [[tasks/2026-09-17-0630-codex-juegos-carpetas]]. Lista para revisión de Codex.
 
-## 2026-09-17 — Plan de selector de carpetas y evolución de Juegos
 
-- Codex inspeccionó selector plano compartido con importación y fallback local por ID. Plan de navegación/selección separadas, búsqueda, conteos sin duplicados, diseño adaptable y movimiento reducido: [[tasks/2026-09-17-0630-codex-juegos-carpetas]]. Juegos nuevos solo propuestos; no se requiere instalar herramientas para etapa 1.
-- Solo memoria modificada (ficha/relevo/backlog/registro). Sin pruebas funcionales ni implementación nueva. Revisión independiente anterior conservada como pendiente; `tools/check-brain.ps1`: OK (32 notas, 110 enlaces, 17 fichas).
-
-## 2026-09-17 — Maquetación de formularios, preview en importador y eliminación segura
-
-- Antigravity implementó y verificó en Chromium real los 4 requerimientos de [[tasks/2026-09-17-0313-codex-importacion-menus]]:
-  1. Formularios de Crear mazo, Crear carpeta y Renombrar con clase propia `dialog.dialog-deck-modal` y `.deck-modal-grid` adaptable (hasta 1100px), sin elementos cortados ni scroll horizontal en los 4 viewports (1366x768, 1024x650, 390x844, 844x390); preview de biblioteca inerte sin listeners en ID ficticio.
-  2. Preview visual de tarjetas en Importar texto de Juegos con layout dividido `.import-split-layout`, manteniendo tabla de revisión y añadiendo tarjeta interactiva (contador `Tarjeta i de N`, anterior/siguiente, voltear), reactividad con debounce (240ms) al teclear y redacción neutral sin promesas "100% legal".
-  3. Eliminar mazo/carpeta desde el menú de la biblioteca sin entrar primero: modal de confirmación con explicación de tarjetas y submazos afectados; opción segura por defecto ("Conservar submazos") y destructiva ("Eliminar todo"); endpoint seguro en `clean_engine.py` y `server.py` con `backup()` previo obligatorio y desanidación limpia sin colisiones.
-  4. Pendientes D resueltos: scroll real desbordado (`scrollHeight: 1961 > clientHeight: 631`, `scrolledTop: 1330`), tamaño manual de tipografía respetado en tarjetas cortas, herencia en hijos de `.cloze` (`.cloze *`) y script `card-runtime.js` aislado para previews.
-- Archivos: `clean_engine.py`, `server.py`, `dist/app.css`, `dist/app.js`, `dist/practice.css`, `dist/practice.js`, `dist/sw.js`, `dist/index.html`, `dist/practice.html`, espejos `docs/`, `tests/test_import_menus_verify.cjs`, `tests/test_clean_engine.py`, `tests/test_server.py`, `tests/test_practice_http.py`, `tests/test_ux_study_audio.cjs`, sincronización a `%LOCALAPPDATA%\Programs\Lumcards`.
-- Validación: `node tests/test_import_menus_verify.cjs` PASS (4/4 pruebas), `.venv/Scripts/python.exe -m unittest discover` PASS (92/92 tests OK), `test_preview_legibilidad_verify.cjs` PASS, `test_ux_study_audio.cjs` PASS, `test_study_blocks_and_preview.cjs` PASS. Hashes SHA-256 idénticos verificados con la instalación local.
-
-## 2026-09-17 — Revisión parcial y plan de importador/formularios/borrado
-
-- Codex ejecutó `node tests/test_preview_legibilidad_verify.cjs`: PASS; detectó cobertura incompleta de scroll largo y nuevos formularios. Código confirma preview mínima 360px en diálogo estrecho, tabla sin tarjeta visual en importador y falta de eliminar en menú biblioteca. Borrado actual no recorre descendientes.
-- Plan para Antigravity en [[tasks/2026-09-17-0313-codex-importacion-menus]]. Solo ficha, relevo, estado, backlog y registro modificados; suite regeneró sus capturas. Sin implementación/instalación ni borrado real. `tools/check-brain.ps1`: OK (31 notas, 105 enlaces, 16 fichas).
-
-## 2026-09-17 — Editor amplio, contraste Lumcards y composición adaptable
-
-- Resultado: implementados y verificados en Chromium real los 3 ejes de la ficha:
-  1. Editor de tarjeta con clase propia `dialog.dialog-card-editor` (ancho min(1200px, 96vw), alto 94dvh, resuelto el límite de 680px en estudio), preview espaciosa de 520px de ancho y 519px de alto sin scroll horizontal; modo móvil en pestañas accesibles `.mobile-tab-bar` con persistencia de borrador.
-  2. Precedencia de estilos Lumcards con contraste WCAG 2.1 verificado de 17.06:1 sobre estilos conflictivos oscuros importados, preservando cloze, KaTeX, SVG y audio; modo Original intacto.
-  3. Contenido corto centrado verticalmente (error < 0.001%) con tipografía adaptativa clamp 24-38px; contenido largo accesible desde el inicio (h3Top: 42.8px) con scroll vertical natural sin recortes.
-- Archivos: `dist/app.css`, `docs/app.css`, `dist/app.js`, `docs/app.js`, `dist/card-runtime.js`, `docs/card-runtime.js`, `tests/test_preview_legibilidad_repro.cjs`, `tests/test_preview_legibilidad_verify.cjs`, `tests/test_ux_study_audio.cjs`, sincronización a `%LOCALAPPDATA%\Programs\Lumcards\dist`.
-- Validación: suites automatizadas en Chromium real en 4 viewports (1366x768, 1024x650, 390x844, 844x390); 7 capturas inspeccionadas en `tests/screenshots_preview_verified/`; suites de audio (`test_ux_study_audio.cjs`), bloques (`test_study_blocks_and_preview.cjs`) y 91 tests de Python en verde. Ficha: [[tasks/2026-09-17-0235-codex-preview-legibilidad]].
-
-## 2026-09-17 — Plan correctivo de preview y legibilidad
-
-- Codex verificó reglas de diálogo, tema y layout frente a capturas del usuario. Plan para Antigravity con regresiones desde estudio, contraste efectivo, centrado adaptativo y pruebas en cuatro viewports: [[tasks/2026-09-17-0235-codex-preview-legibilidad]].
-- Solo memoria modificada: ficha, relevo, estado y backlog. Sin implementación, instalación ni pruebas funcionales nuevas; `tools/check-brain.ps1` OK (30 notas, 100 enlaces, 15 fichas). Preservados cambios ajenos.
-
-## 2026-09-17 — Personalización real, bloques de estudio y vistas previas en tiempo real
-
-- Resultado: implementados los 4 ejes solicitados:
-  1. Personalizador con renderizado unificado en iframe CSP (`mountCard`), tema "Lumcards Índigo" (con migración retrocompatible de quizlet), centrado real, scroll interno seguro y precedencia configurable frente a estilos importados.
-  2. Estudio en bloques (10, 20, 50, personalizado, todas hoy) con explicación mazo total vs hoy, persistencia en disco (`study_blocks.json`), conteo de tarjetas únicas sin inflar por «Otra vez», resumen al finalizar primera pasada y soporte para recargas.
-  3. Identificación de tarjetas ya repasadas con checkmark visible, etiqueta «Repasada en este bloque», filtros dedicados y distinción del historial previo «Repasada antes» (separado de Juegos).
-  4. Vistas previas en tiempo real al crear mazos (tarjeta en biblioteca) y tarjetas (split-view en escritorio, pestañas en móvil, alternancia anverso/reverso y modos de juego), sin autoplay ni efectos secundarios.
-- Archivos: `clean_engine.py`, `server.py`, `dist/app.js`, `dist/app.css`, `dist/student.css`, `dist/sw.js`, `dist/index.html`, `dist/practice.html`, espejos `docs/`, `tests/test_study_blocks_and_preview.cjs`, sincronización a `%LOCALAPPDATA%\Programs\Lumcards`.
-- Validación: suite Chromium E2E completa en 4 viewports (1366x768, 1024x650, 390x844, 844x390) con mazo sintético de 565 tarjetas; 15 capturas inspeccionadas; 91 pruebas Python `unittest` pasando (100% OK); servidor en puerto 8765 activo y host `Lumcards.exe` (PID 19212) activo. Sin commit ni publicación. Ficha: [[tasks/2026-09-17-0145-antigravity-personalizacion-bloques-vistas]].
-
-## 2026-09-17 — Causa del audio comprobada: CSP del iframe
-
-- Código inline bloqueado por CSP heredada. Añadido card-runtime.js externo y ruta estática; contenido con flujo normal, altura mínima del viewport y fondo compartido. No se cambió el motor.
-- Pruebas: reproducción y reinicio reales en Chromium, pantalla completa de estudio y reverso largo a 1366x768, 1024x650, 390x844 y 844x390; 19 pruebas Python, UX/Frontend Node y sintaxis correctas. Archivos locales instalados idénticos por SHA256; servidor reiniciado y runtime HTTP 200. No se verificó salida auditiva física ni APK.
-- [[tasks/2026-09-17-codex-csp-responsive]]. Sin commit ni publicación.
-
-## 2026-09-16 — Audio delegado y visor flex-start completados y validados
-
-- Resultado: Antigravity reescribió `installCardAudioRuntime` para que el iframe de la tarjeta siempre delegue la reproducción de audio a la ventana padre mediante `postMessage('ankiPlayAudio')`, evadiendo los bloqueos del sandbox de WebView2/iframes en la carga de medios. Además, el `min-height: 100dvh` se eliminó de la tarjeta a favor de `height: 100%` con `justify-content: flex-start`, logrando que las tarjetas se adapten naturalmente a la parte superior de la pantalla, sin espacios negros forzados.
-- Archivos: `dist/app.js`, `dist/app.css`, tests Node y Python actualizados para la nueva caché `20260916-audio-layout`, y `dist/` sincronizado en `docs/`.
-- Validación: 90/90 pruebas Python, 6 suites Node/JS correctas, y paridad SHA256 completada. Falló el subagente de navegador al intentar usar CDP para captura visual por restricciones técnicas, pero conductualmente el código está validado por pruebas unitarias/DOM. Sin commit, `push` ni publicación. Ficha: [[tasks/2026-09-16-1300-antigravity-audio-parent-delegation]].
-
-## 2026-09-16 — Parlantes incrustados repetibles y visor horizontal sin franjas
-
-- Resultado: el audio ahora se inicia dentro del gesto de clic del iframe, cada pulsación detiene y rebobina la reproducción anterior y los callbacks tardíos no alteran la nueva. La clase `.card` pasó a un wrapper interior de ancho completo para que los estilos importados no reduzcan el `<body>` ni expongan grandes franjas laterales.
-- Archivos: `dist/app.js`, `docs/app.js`, versión `20260916-ux3` en HTML/SW, `tests/test_ux_study_audio.cjs` y memoria. Los cuatro activos cambiados se sincronizaron con la instalación local y Lumcards raíz se reabrió.
-- Validación: 90/90 pruebas Python y seis suites Node/JS correctas; sintaxis JS, paridad `dist`/`docs`, SHA256 instalado y respuesta del servidor activo verificadas; `git diff --check` correcto. No hubo captura nativa automatizada ni prueba auditiva por hardware. Sin commit, `push` ni publicación. Ficha: [[tasks/2026-09-16-1222-codex-audio-ancho-estudio]].
-
-## 2026-09-16 — Correcciones UX hechas efectivas en el paquete Windows
-
-- Resultado: los archivos instalados contenían las correcciones, pero WebView2 podía servir la primera variante defectuosa porque todas las iteraciones compartían `20260915-ux`. Se renovó la caché a `20260916-ux2`, se forzó la actualización del service worker, se hizo network-first la navegación y el host añade una URL única por apertura. Paquete raíz e instalación local actualizados y aplicación reabierta.
-- Archivos: `dist/index.html`, `dist/practice.html`, `dist/sw.js`, espejos `docs/`, `tools/launcher.cs`, pruebas HTTP/JS y `tests/test_installer_payload.py`.
-- Validación: autoprueba WinForms/WebView2 con entorno temporal correcta; ocho activos instalados y ejecutables idénticos al build por SHA256; 90/90 pruebas Python, seis suites Node, sintaxis JS y `git diff --check` correctos. El conector visual no expuso la ventana nativa, así que la captura final queda para observación del usuario. No se hizo commit, `push` ni publicación. Ficha: [[tasks/2026-09-16-1209-codex-cache-empaquetado-ux]].
-
-## 2026-09-16 — Arranque de la instalación Windows reparado
-
-- Resultado: el fallo era de empaquetado, no de la biblioteca: `engine.py` estaba instalado sin su dependencia `clean_engine.py`. Los instaladores PowerShell y gráfico ahora copian y exigen ese módulo; la instalación local se reparó sin modificar datos del usuario y el instalador gráfico se reconstruyó.
-- Archivos: `installer.ps1`, `tools/installer_gui.cs`, `tests/test_installer_payload.py`; artefacto local `Instalador Lumcards.exe` reconstruido.
-- Validación: 2 pruebas nuevas de contrato, compilación C# correcta, importación de `engine` y salud HTTP del servidor instalado con datos temporales, suite Python completa 89/89 y `git diff --check` correcto. No se hizo commit, `push` ni publicación. Ficha: [[tasks/2026-09-16-1158-codex-instalador-clean-engine]].
-
-## 2026-09-16 — Revisión final UX y audio aprobada
-
-- Resultado: Codex aprobó la implementación de Antigravity. La guardia de identidad de `AudioPlayer.cleanup()` ocurre antes de retirar `playing` o limpiar referencias; los callbacks tardíos de una instancia anterior ya no alteran la reproducción vigente. No se detectaron regresiones, pérdida de datos, cambios de privacidad ni alcance indebido.
-- Evidencia: prueba conductual con `FakeAudio.instances` y eventos `onended`/`onerror` de la instancia antigua; seis suites Node/JS, 87 pruebas Python, `node --check` en `dist/app.js` y `dist/practice.js`, `git diff --check` y SHA256 de los ocho pares frontend modificados, todo correcto. La validación visual previa permaneció aplicable porque el último cambio fue exclusivamente el orden de limpieza y su prueba.
-- Estado: implementado y probado localmente; no committeado, subido ni desplegado. Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
-
-## 2026-09-16 — Corrección de carrera de audio y prueba conductual completadas
-
-- Resultado: Antigravity resolvió el P2 pendiente en `AudioPlayer.cleanup()`. Se comprueba `this.currentAudio === audio` antes de retirar la clase `playing` y limpiar referencias. En la prueba VM `tests/test_ux_study_audio.cjs`, se invocan `onended` y `onerror` de la instancia desprendida verificando conductualmente que el botón retiene la clase `playing` y la instancia activa no se altera.
-- Archivos: `dist/practice.js`, `docs/practice.js`, `tests/test_ux_study_audio.cjs`.
-- Validación reportada por Antigravity: 6 suites Node/JS (todas pasan), 87 pruebas Python `unittest` en `.venv` (todas pasan), `node --check` OK y `git diff --check` OK. La revisión final de Codex verificó los ocho pares frontend modificados de `dist/`/`docs/` como idénticos.
-- Ficha: [[tasks/2026-09-15-1355-antigravity-ux-estudio-audio-juegos]].
+Entradas anteriores: [[archive/2026-09-studio-cierre-log]].

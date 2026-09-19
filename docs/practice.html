@@ -5,32 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#4f46e5">
   <title>Jugar y aprender · Lumcards Studio</title>
-  <script>
-    try {
-      if (localStorage.getItem('anki2-theme') === 'dark') {
-        document.documentElement.classList.add('dark');
-      }
-    } catch (_) {}
-  </script>
+  <script src="/client-startup.js?v=20260919-drive-oauth-r7"></script>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/app.css?v=20260917-web-stats">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <link rel="stylesheet" href="/practice.css?v=20260917-web-stats-studio-final">
-  <link rel="stylesheet" href="/student.css?v=20260917-web-stats">
+  <link rel="stylesheet" href="/app.css?v=20260918-studio-workspace-r2">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/practice.css?v=20260918-studio-workspace-r2">
+  <link rel="stylesheet" href="/student.css?v=20260918-studio-workspace-r2">
   <link rel="manifest" href="/manifest.json">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
-  <script defer src="/study-games.js?v=20260917-web-stats"></script>
-  <script defer src="/practice.js?v=20260917-web-stats"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-          .then(registration => registration.update())
-          .catch(() => {});
-      });
-    }
-  </script>
+  <script defer src="/vendor/katex/katex.min.js"></script>
+  <script defer src="/vendor/katex/contrib/auto-render.min.js"></script>
+  <script defer src="/study-games.js?v=20260918-studio-workspace-r2"></script>
+  <script defer src="/practice.js?v=20260918-studio-workspace-r2"></script>
 </head>
 <body class="practice-studio">
   <a class="studio-skip" href="#play-content">Saltar al contenido</a>

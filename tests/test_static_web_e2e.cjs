@@ -82,7 +82,7 @@ const fixture = (stringTime=false) => ({ ...empty(), decks:[{id:11,name:'Synthet
     });
     await scenario('legacy numeric-string review timestamp',fixture(true),async page=>{assert.equal((await openStats(page)).today,1);});
     await scenario('storage failure must not report saved',empty(),async page=>{
-      await page.evaluate(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='lumcards_web_data')throw new DOMException('Synthetic quota failure','QuotaExceededError');return original.call(this,k,v);};});
+      await page.evaluate(()=>{const original=Storage.prototype.setItem;window.restoreStorage=()=>{Storage.prototype.setItem=original;};window.cloudWrites=0;window.LumcardsSync.firebase.isConnected=()=>true;window.LumcardsSync.firebase.syncFullWorkspace=async()=>{cloudWrites++;};Storage.prototype.setItem=function(k,v){if(k==='lumcards_web_data')throw new DOMException('Synthetic quota failure','QuotaExceededError');return original.call(this,k,v);};});
       await page.locator('[data-action="new-deck"]').first().click();
       await page.locator('#deck-name-input').fill('Must not fake success');
       await page.locator('#deck-form button[data-mutate]').click();
@@ -90,11 +90,35 @@ const fixture = (stringTime=false) => ({ ...empty(), decks:[{id:11,name:'Synthet
       assert(await page.locator('#deck-form').isVisible(),'Creation form must stay open on failed persistence');
       assert((await page.locator('#deck-form .form-error').innerText()).trim().length>0,'Explain storage failure');
       assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('lumcards_web_data')).decks.length),0);
+      await page.waitForTimeout(1300);assert.equal(await page.evaluate(()=>cloudWrites),0,'Failed local save must never upload');await page.evaluate(()=>restoreStorage());assert.equal(await page.locator('#deck-name-input').inputValue(),'Must not fake success');await page.locator('#deck-form button[data-mutate]').click();await page.waitForFunction(()=>!busy);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('lumcards_web_data')).decks.length),1);
     });
     await scenario('unreadable storage must never be replaced with demo data','{"decks":[',async page=>{
       assert.equal(await page.evaluate(()=>localStorage.getItem('lumcards_web_data')==='{"decks":['),true,'Preserve the original payload for recovery');
       assert(await page.locator('.error-panel').isVisible(),'Explain unreadable data instead of silently resetting');
     },true);
+
+    const mixed=fixture(true);mixed._revlogs.push({id:'not-a-date',cid:now-1000},{id:1e99,cid:now-1000},{id:now+86400000,cid:now-1000},null);
+    await scenario('invalid and future history is preserved but not counted',mixed,async page=>{
+      assert.equal((await openStats(page)).today,1);
+      assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('lumcards_web_data'))._revlogs),mixed._revlogs);
+      assert.equal(await page.evaluate(()=>detailedStats.history.days30.reduce((sum,d)=>sum+d.reviews,0)),1);
+    });
+    const noHistory=empty();noHistory.stats.reviewedToday=20;
+    await scenario('missing history never invents retention or study time',noHistory,async page=>{
+      assert.equal((await openStats(page)).today,0);assert.equal(await page.evaluate(()=>detailedStats.today.retentionToday),null);assert.equal(await page.evaluate(()=>detailedStats.today.timeSeconds),0);
+    });
+    await scenario('invalid stored shape stays intact','null',async page=>{
+      assert.equal(await page.evaluate(()=>localStorage.getItem('lumcards_web_data')),'null');assert(await page.locator('.error-panel').isVisible());
+    },true);
+    await scenario('statistics failure has one request and manual recovery',fixture(),async page=>{
+      await page.evaluate(()=>{window.originalStatsApi=api;window.statsCalls=0;api=async(...args)=>{if(args[0].startsWith('stats/detailed')){statsCalls++;return null;}return originalStatsApi(...args);};});
+      await page.locator('[data-view="stats"]').click();await page.locator('[data-action="retry-stats"]').waitFor();await page.waitForTimeout(400);assert.equal(await page.evaluate(()=>statsCalls),1);
+      const dir=path.join(__dirname,'screenshots_web_recovery');fs.mkdirSync(dir,{recursive:true});
+      for(const [w,h] of [[390,844],[844,390],[1024,650],[1366,768],[320,844],[683,384]])for(const dark of [false,true]){
+        await page.setViewportSize({width:w,height:h});await page.emulateMedia({reducedMotion:'reduce'});await page.evaluate(d=>document.documentElement.classList.toggle('dark',d),dark);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(dir,`${w}-${dark?'dark':'light'}.png`)});
+      }
+      await page.evaluate(()=>{api=originalStatsApi;});await page.locator('[data-action="retry-stats"]').focus();await page.keyboard.press('Enter');await page.locator('.stats-container').waitFor();assert.equal(await page.evaluate(()=>detailedStats.today.cardsStudied),1);assert.equal(await page.evaluate(()=>document.activeElement.id),'main');
+    });
     assert.deepEqual(failures,[],'Static browser regressions failed');
   }finally{
     if(browser)await browser.close();

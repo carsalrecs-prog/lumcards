@@ -1,0 +1,38 @@
+[
+  {
+    "suite": "test_frontend.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_library_navigation_design.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_study_studio_design.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_studio_etapa3_design.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_practice_studio.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_practice_folder_selection.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_study_blocks_and_preview.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_ux_study_audio.cjs",
+    "exitCode": 0
+  },
+  {
+    "suite": "test_web_stats.cjs",
+    "exitCode": 0
+  }
+]

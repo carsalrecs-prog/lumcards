@@ -54,30 +54,12 @@ async function testFirebase() {
 // 4. Probar Google Drive Provider
 async function testDrive() {
   assert.equal(SyncManager.drive.isConnected(), false);
-  const signInRes = await SyncManager.drive.signIn('mock_oauth_token_123');
-  assert.equal(signInRes.success, true);
-  assert.equal(SyncManager.drive.isConnected(), true);
-  assert.equal(SyncManager.drive.token, 'mock_oauth_token_123');
-
-  // Probar conexión directa con solo correo (sin API keys)
-  const emailRes = await SyncManager.drive.signIn('estudiante@gmail.com');
-  assert.equal(emailRes.success, true);
-  assert.equal(SyncManager.drive.isConnected(), true);
-  assert.equal(emailRes.user.email, 'estudiante@gmail.com');
-
-  // Subir respaldo sin necesidad de API keys de desarrollador
-  const fakeBlob = { size: 1024 };
-  const uploadRes = await SyncManager.drive.uploadDeck(fakeBlob, 'test_backup.colpkg');
-  assert.ok(uploadRes.name);
-
-  const fileList = await SyncManager.drive.listFiles();
-  assert.ok(Array.isArray(fileList));
-  assert.ok(fileList.length > 0);
-
-  // Desconectar
-  SyncManager.drive.disconnect();
+  await assert.rejects(SyncManager.drive.signIn('estudiante@example.test'), /configurad/);
+  await assert.rejects(SyncManager.drive.uploadDeck(new Blob(['synthetic']), 'test.colpkg'), /Conecta/);
+  await assert.rejects(SyncManager.drive.listFiles(), /Conecta/);
+  await assert.rejects(SyncManager.drive.downloadDeck('synthetic'), /Conecta/);
   assert.equal(SyncManager.drive.isConnected(), false);
-  console.log('✓ GoogleDriveProvider conecta por correo y respalda sin requerir API keys');
+  console.log('✓ Drive rechaza conexiones y copias sin OAuth; contrato GIS en test_drive_oauth.cjs');
 }
 
 // 5. Probar Elección de Destino de Almacenamiento y Modo Invitado

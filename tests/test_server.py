@@ -63,7 +63,11 @@ class ServerTests(unittest.TestCase):
     def test_01_static_and_initial_state(self):
         page = self.request('/', raw=True).decode()
         self.assertIn('lang="es"', page)
-        self.assertIn('/app.js?v=20260917-web-stats', page)
+        self.assertIn('/app.js?v=20260919-drive-oauth-r6', page)
+        self.assertIn('/client-startup.js?v=20260919-drive-oauth-r7', page)
+        startup = self.request('/client-startup.js', raw=True)
+        self.assertIn(b'serviceWorker', startup)
+        self.assertIn(b'702374747374-e4f826l9rpoa33ebmidnov2mb3ncq88h.apps.googleusercontent.com', startup)
         state = self.request('/api/state')
         self.assertEqual(state['stats']['totalCards'], 13)
         self.assertEqual(state['stats']['reviewedToday'], 0)
@@ -72,8 +76,8 @@ class ServerTests(unittest.TestCase):
 
     def test_student_stylesheet_is_served_for_both_screens(self):
         for route in ('/', '/practice.html'):
-            self.assertIn('/student.css?v=20260917-web-stats', self.request(route, raw=True).decode())
-        with urllib.request.urlopen(self.url + '/student.css?v=20260917-web-stats') as response:
+            self.assertIn('/student.css?v=20260918-studio-workspace-r2', self.request(route, raw=True).decode())
+        with urllib.request.urlopen(self.url + '/student.css?v=20260918-studio-workspace-r2') as response:
             self.assertIn('text/css', response.headers['Content-Type'])
             self.assertIn(b'.study-tools-grid', response.read())
 

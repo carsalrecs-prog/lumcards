@@ -1,9 +1,27 @@
 ---
 tags: [lumcards, estado]
-updated: 2026-09-18
+updated: 2026-09-19
 ---
 
 # Estado actual
+
+## Nube — 2026-09-19
+
+- Drive real configurado: API habilitada, cliente OAuth público integrado, orígenes y permisos mínimos guardados. Autorización, subida, listado, descarga e importación remotas PASS con copia sintética de 4 KB, luego retirada por Richard; carpeta verificada vacía. Código/cache r7 local sin publicar. [[tasks/2026-09-19-1207-codex-completar-drive-real]]
+
+- Inicializacion recursiva Firebase corregida y probada; Google Auth y Firestore confirmados sin consultar biblioteca. Reglas contra autoaprobacion publicadas con autorizacion expresa. Aplicacion sin publicar; control de acceso pago integral sigue pendiente. [[tasks/2026-09-19-0502-codex-validar-nube]].
+
+
+## Studio restante — 2026-09-18
+
+- Mi espacio, cuenta, transferencias, preferencias, copias, importadores y editor adaptados a Studio; administración/reset recientes revisados con datos sintéticos. Cambios espejados dist/docs; app.js y cache 20260918-studio-workspace-r4; otros activos r2 y KaTeX local conservados.
+- Estados de transferencia veraces, confirmaciones con consecuencias, foco recuperado, preview sin guardar ni audio. Biblioteca/Estudio/Juegos conservados; correcciones acotadas de reflow en estadísticas.
+- Evidencia y límites: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. No se declara cierre integral: KaTeX local corregido y probado (24 checks y cache offline); Firebase externo sigue bloqueado por CSP; los cuatro fallos web conocidos estan corregidos y probados con datos sinteticos; nube real sigue sin validar. No empaquetado, instalado ni publicado en esta tarea.
+
+## Reparacion funcional web — 2026-09-18
+
+- Guardado fallido conserva borrador, informa error y no agenda subida; JSON ilegible/formato invalido preservado sin sustitucion por demo. Fechas locales y timestamps numericos heredados coherentes; registros invalidos conservados sin bloquear calculos. Estadisticas con error y reintento manual sin bucle.
+- 9 escenarios Chromium y creacion/recarga offline PASS. Ficha [[tasks/2026-09-18-2133-codex-reparar-persistencia-web]]. Sin cambios de motor/SRS ni despliegue.
 
 ## Memoria compartida
 

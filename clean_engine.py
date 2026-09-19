@@ -1829,12 +1829,12 @@ class CleanEngine:
         }
         breakdown_meta = {
             'new': ('Nuevas', '#5bb1e8'),
-            'learning': ('Aprendiendo', '#f97316'),
-            'relearning': ('Reaprendiendo', '#ef4444'),
-            'young': ('Jóvenes', '#86efac'),
-            'mature': ('Maduras', '#22c55e'),
-            'suspended': ('Suspendidas', '#eab308'),
-            'buried': ('Enterradas', '#94a3b8'),
+            'learning': ('En estudio (primeros días)', '#f97316'),
+            'relearning': ('Reaprendiendo (corregidas)', '#ef4444'),
+            'young': ('En estudio avanzado (1-20 días)', '#86efac'),
+            'mature': ('Dominadas (>20 días)', '#22c55e'),
+            'suspended': ('Pausadas (no incluidas en repaso)', '#eab308'),
+            'buried': ('Ocultas (sin acceso directo)', '#94a3b8'),
         }
         card_breakdown = {'total': total_cards}
         for key, (label, color) in breakdown_meta.items():
@@ -1979,6 +1979,57 @@ class CleanEngine:
             'reviewedToday': today_count,
             'retentionRate': round(100 * remembered / len(month_logs)) if month_logs else None,
         }
+
+    def reset_deck(self, deck_id: Any) -> Dict[str, Any]:
+        """Reinicia todas las tarjetas de un mazo a estado 'new' (nuevas)."""
+        self._check_thread()
+        did = self._deck_id(deck_id)
+        dids = set(self.col.decks.deck_and_child_ids(did))
+        dids_str = ','.join(map(str, dids))
+
+        # Obtener todas las tarjetas del mazo
+        cards = self.col.db.all(f'select id from cards where did in ({dids_str})')
+
+        reset_count = 0
+        for row in cards:
+            cid = row[0]
+            card = self.col.get_card(cid)
+            # Resetear a estado nuevo
+            card.type = 0  # 0=new, 1=learning, 2=review
+            card.queue = 0  # 0=new
+            card.due = self.col.next_id()
+            card.ivl = 0
+            card.factor = 2500
+            card.reps = 0
+            card.lapses = 0
+            self.col.update_card(card)
+            reset_count += 1
+
+        return {'success': True, 'deckId': did, 'cardsReset': reset_count}
+
+    def reset_all(self) -> Dict[str, Any]:
+        """Reinicia todas las tarjetas de la colección a estado 'new'."""
+        self._check_thread()
+
+        # Obtener todas las tarjetas
+        cards = self.col.db.all('select id from cards')
+
+        reset_count = 0
+        for row in cards:
+            cid = row[0]
+            card = self.col.get_card(cid)
+            # Resetear a estado nuevo
+            card.type = 0
+            card.queue = 0
+            card.due = self.col.next_id()
+            card.ivl = 0
+            card.factor = 2500
+            card.reps = 0
+            card.lapses = 0
+            self.col.update_card(card)
+            reset_count += 1
+
+        return {'success': True, 'cardsReset': reset_count}
 
     def state(self, include_cards: bool = True) -> Dict[str, Any]:
         self._check_thread()

@@ -1,12 +1,55 @@
+// Reglas de seguridad de Cloud Firestore para el proyecto "lumcards".
+//
+// CÓMO DESPLEGAR (el agente no tiene acceso para hacerlo por ti):
+//   Opción A — Consola web: console.firebase.google.com > proyecto "lumcards" >
+//     Firestore Database > pestaña "Reglas" > pega este archivo completo > Publicar.
+//   Opción B — Firebase CLI: `firebase deploy --only firestore:rules`
+//     (requiere `firebase login` y `firebase use lumcards` primero).
+//
+// Qué protegen:
+//   - Cada usuario puede leer y actualizar su propio documento en /users/{uid}
+//     (mazos, tarjetas, estadísticas, ajustes — lo que ya sincroniza sync-manager.js),
+//     pero NO puede cambiar sus propios campos de acceso (accessApproved, isAdmin,
+//     accessNote, accessUpdatedAt, accessUpdatedBy).
+//   - Solo el correo administrador (carsal.recs@gmail.com) puede leer la lista
+//     completa de usuarios y aprobar/revocar el acceso de cualquiera.
+//   - Ver brain/03_DECISIONS.md → "Modelo de negocio: acceso pago manual + tienda
+//     de mazos" en el repositorio Lumcards para el contexto de negocio.
+
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Cada estudiante solo puede leer y guardar sus propios datos
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email_verified == true && request.auth.token.email == 'carsal.recs@gmail.com';
     }
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      // Owners may start pending, never grant themselves approval or admin fields.
+      allow create: if isOwner(uid) && (isAdmin() || (
+        (!request.resource.data.keys().hasAny(['accessApproved']) || request.resource.data.accessApproved == false) &&
+        (!request.resource.data.keys().hasAny(['isAdmin']) || request.resource.data.isAdmin == false) &&
+        !request.resource.data.keys().hasAny(['accessNote', 'accessUpdatedAt', 'accessUpdatedBy'])
+      ));
+      allow update: if isAdmin() || (
+        isOwner(uid) &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['accessApproved', 'isAdmin', 'accessNote', 'accessUpdatedAt', 'accessUpdatedBy'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Por defecto, cualquier otra colección queda cerrada hasta que se
+    // defina explícitamente (evita accesos accidentales a datos futuros).
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

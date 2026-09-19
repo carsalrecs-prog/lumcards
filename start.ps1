@@ -41,6 +41,7 @@ for ($ankiAttempt = 0; $ankiAttempt -lt 90; $ankiAttempt++) {
         if ($ankiHealth.app -eq 'lumcards' -or $ankiHealth.app -eq 'anki2') {
             exit 0
         }
+    } catch { }
     if ($ankiProcess.HasExited) {
         try {
             $ankiHealth = Invoke-RestMethod -Uri "$ankiUrl/api/health" -TimeoutSec 2

@@ -11,23 +11,24 @@ $ankiServer = Start-Process -FilePath (Join-Path $ankiRoot '.venv\Scripts\python
 try {
     $ankiHealthy = $false
     for ($ankiAttempt=0; $ankiAttempt -lt 30; $ankiAttempt++) {
-        try { $ankiHealth=Invoke-RestMethod "$ankiUrl/api/health" -TimeoutSec 2; if($ankiHealth.app -eq 'anki2') { $ankiHealthy=$true; break } } catch { }
+        try { $ankiHealth=Invoke-RestMethod "$ankiUrl/api/health" -TimeoutSec 2; if($ankiHealth.app -eq 'lumcards' -or $ankiHealth.app -eq 'anki2') { $ankiHealthy=$true; break } } catch { }
         if($ankiServer.HasExited) { throw (Get-Content -Raw -LiteralPath (Join-Path $ankiTemp 'server-error.log')) }
         Start-Sleep -Milliseconds 300
     }
     if(-not $ankiHealthy) { throw 'No se pudo iniciar el servidor de prueba.' }
     $ankiReport = Join-Path $ankiTemp 'native-window.json'
     $ankiArgs = @('--self-test','--no-server','--url',"$ankiUrl/",'--profile',('"' + (Join-Path $ankiTemp 'webview') + '"'),'--report',('"' + $ankiReport + '"'))
-    $ankiDesktop = Start-Process -FilePath (Join-Path $DesktopDir 'Anki 2.0.exe') -ArgumentList $ankiArgs -WorkingDirectory $DesktopDir -WindowStyle Hidden -PassThru
+    $lumExe = if (Test-Path -LiteralPath (Join-Path $DesktopDir 'Lumcards.exe')) { Join-Path $DesktopDir 'Lumcards.exe' } else { Join-Path $ankiRoot 'Lumcards.exe' }
+    $ankiDesktop = Start-Process -FilePath $lumExe -ArgumentList $ankiArgs -WorkingDirectory (Split-Path $lumExe -Parent) -WindowStyle Hidden -PassThru
     if(-not $ankiDesktop.WaitForExit(45000)) { Stop-Process -Id $ankiDesktop.Id; throw 'El visor de prueba no terminó.' }
     if(-not (Test-Path -LiteralPath $ankiReport)) { throw "El visor no generó su informe. Salida: $($ankiDesktop.ExitCode)" }
     $ankiResult = Get-Content -Raw -LiteralPath $ankiReport | ConvertFrom-Json
     if(-not $ankiResult.success) { throw $ankiResult.error }
-    if($ankiResult.host -ne 'WinForms WebView2' -or $ankiResult.windowTitle -ne 'Anki 2.0') { throw 'La ventana no es el host de escritorio esperado.' }
+    if($ankiResult.host -ne 'WinForms WebView2' -or $ankiResult.windowTitle -ne 'Lumcards') { throw 'La ventana no es el host de escritorio esperado.' }
     if($ankiDesktop.ExitCode -ne 0) { throw 'La ventana nativa terminó con error.' }
     $ankiResult | ConvertTo-Json -Depth 4
     Write-Host "Prueba nativa completada. Informe: $ankiReport"
 } finally {
-    try { Invoke-RestMethod "$ankiUrl/api/shutdown" -Method Post -ContentType 'application/json' -Headers @{'X-Anki-Request'='1'} -Body '{}' -TimeoutSec 10 | Out-Null } catch { }
+    try { Invoke-RestMethod "$ankiUrl/api/shutdown" -Method Post -ContentType 'application/json' -Headers @{'X-Lumcards-Request'='1';'X-Anki-Request'='1'} -Body '{}' -TimeoutSec 10 | Out-Null } catch { }
     if(-not $ankiServer.WaitForExit(10000)) { Stop-Process -Id $ankiServer.Id -ErrorAction SilentlyContinue }
 }

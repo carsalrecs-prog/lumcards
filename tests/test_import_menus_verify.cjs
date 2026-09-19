@@ -254,7 +254,7 @@ const assert = require('node:assert/strict');
 
     // Confirmar eliminación
     await page.locator('#btn-submit-delete-deck').click();
-    await page.waitForTimeout(600);
+    await page.locator('.deck-card', {hasText:'Mazo para Borrar'}).waitFor({state:'detached',timeout:10000});
 
     // Verificar que el mazo ya no existe en la biblioteca
     const mazoCardAfter = page.locator('.deck-card', { hasText: 'Mazo para Borrar' });
@@ -287,7 +287,7 @@ const assert = require('node:assert/strict');
 
     // Confirmar borrado seguro
     await page.locator('#btn-submit-delete-deck').click();
-    await page.waitForTimeout(600);
+    await page.locator('.deck-card.folder-card', {hasText:'Carpeta Idiomas'}).waitFor({state:'detached',timeout:10000});
 
     // Comprobar que la carpeta ya no existe, pero los submazos ahora están desanidados en la biblioteca
     const carpetaCardAfter = page.locator('.deck-card.folder-card', { hasText: 'Carpeta Idiomas' });
@@ -398,7 +398,7 @@ Núcleo\tContiene el material genético`;
     // Guardar
     assert.equal(await page.locator('#save-import-btn').isDisabled(), false, 'Botón Guardar debe estar habilitado');
     await page.locator('#save-import-btn').click();
-    await page.waitForTimeout(600);
+    await page.waitForFunction(async()=>{const response=await fetch('/api/state');const state=await response.json();return state.decks.some(d=>d.name==='Mazo Importado E2E' && d.total===4);},{},{timeout:10000,polling:100});
 
     // Verificar que se creó el nuevo mazo en la biblioteca
     const checkDeckRes = await fetch(`http://127.0.0.1:${port}/api/state`);
