@@ -7,9 +7,9 @@ updated: 2026-09-19
 
 ## Control
 - Estado: lista_para_relevo.
-- Agente: Antigravity; actualizado 2026-09-19T13:43:00-05:00.
-- Entorno: D:\CODEX, main, base d462d57; listado Drive y descargas web reparadas.
-- Ficha vigente: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]]. Tarea anterior: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]]. Tarea previa: [[tasks/2026-09-19-1207-codex-completar-drive-real]].
+- Agente: Antigravity; actualizado 2026-09-19T14:30:00-05:00.
+- Entorno: D:\CODEX, main; resuelto auth/internal-error con Google Identity Services directo.
+- Ficha vigente: [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]]. Tarea anterior: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]]. Tarea previa: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]].
 - Ficha anterior: [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]] (hecha: formulas locales).
 - Ficha previa: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Historial visual: [[tasks/2026-09-18-1426-antigravity-redisenar-resto-aplicacion]].
 

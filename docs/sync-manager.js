@@ -473,40 +473,94 @@
       return raw ? JSON.parse(raw) : null;
     },
 
-    // Inicio de sesión con Cuenta de Google oficial (Popup de Google)
+    // Inicio de sesión con Cuenta de Google oficial
     async signInWithGoogle() {
-      if (typeof window !== 'undefined' && window.firebase?.auth) {
+      if (typeof window === 'undefined') throw new Error('No disponible en este entorno.');
+      this.init();
+
+      const auth = window.firebase?.auth?.();
+      if (!auth) {
+        throw new Error('Servicio de Firebase Auth no disponible. Comprueba tu conexión a internet.');
+      }
+
+      const clientId = window.LUMCARDS_DRIVE_CLIENT_ID;
+      const oauth = window.google?.accounts?.oauth2;
+
+      // Estrategia 1: Google Identity Services (OAuth Token Client directo).
+      // Esta vía se comunica directamente con accounts.google.com y no depende de cookies
+      // de terceros entre dominios (por ejemplo entre lumcards.vercel.app y lumcards.firebaseapp.com),
+      // evitando el error habitual "auth/internal-error" de los navegadores modernos.
+      if (oauth && clientId) {
         try {
-          const auth = window.firebase.auth();
-          const provider = new window.firebase.auth.GoogleAuthProvider();
-          provider.setCustomParameters({ prompt: 'select_account' });
-          const userCred = await auth.signInWithPopup(provider);
+          const token = await new Promise((resolve, reject) => {
+            const client = oauth.initTokenClient({
+              client_id: clientId,
+              scope: 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+              error_callback: (err) => reject(new Error(err?.message || 'No se completó la autorización con Google.')),
+              callback: (resp) => {
+                if (resp.error) {
+                  reject(new Error(resp.error_description || resp.error || 'Google no autorizó el acceso.'));
+                } else if (!resp.access_token) {
+                  reject(new Error('No se recibió el token de acceso de Google.'));
+                } else {
+                  resolve(resp.access_token);
+                }
+              }
+            });
+            client.requestAccessToken({ prompt: 'select_account' });
+          });
+
+          const credential = window.firebase.auth.GoogleAuthProvider.credential(null, token);
+          const userCred = await auth.signInWithCredential(credential);
           this.user = {
             uid: userCred.user.uid,
             email: userCred.user.email,
-            name: userCred.user.displayName || userCred.user.email.split('@')[0],
-            photoURL: userCred.user.photoURL,
+            name: userCred.user.displayName || (userCred.user.email ? userCred.user.email.split('@')[0] : 'Estudiante'),
+            photoURL: userCred.user.photoURL || '',
             provider: 'google'
           };
           localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
           return { success: true, user: this.user };
-        } catch (err) {
-          console.warn('Firebase Google Auth error:', err);
-          if (err.code === 'auth/popup-closed-by-user') {
-            throw new Error('La ventana de Google se cerró antes de completar el inicio de sesión.');
+        } catch (gisErr) {
+          console.warn('Google Identity Services auth failed or was cancelled, attempting popup fallback:', gisErr);
+          if (gisErr.message?.includes('No se completó') || gisErr.message?.includes('cancel')) {
+            throw gisErr;
           }
-          if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
-            return {
-              success: false,
-              needsProviderEnable: true,
-              error: 'Debes habilitar el proveedor "Google" en la consola de Firebase.',
-              consoleUrl: 'https://console.firebase.google.com/project/lumcards/authentication/providers'
-            };
-          }
-          throw err;
         }
       }
-      throw new Error('Servicio de Google Auth no disponible. Comprueba tu conexión a internet.');
+
+      // Estrategia 2: Fallback tradicional con signInWithPopup de Firebase
+      try {
+        const provider = new window.firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        const userCred = await auth.signInWithPopup(provider);
+        this.user = {
+          uid: userCred.user.uid,
+          email: userCred.user.email,
+          name: userCred.user.displayName || (userCred.user.email ? userCred.user.email.split('@')[0] : 'Estudiante'),
+          photoURL: userCred.user.photoURL || '',
+          provider: 'google'
+        };
+        localStorage.setItem(STORAGE_KEYS.FIREBASE_USER, JSON.stringify(this.user));
+        return { success: true, user: this.user };
+      } catch (err) {
+        console.warn('Firebase Google Auth error:', err);
+        if (err.code === 'auth/popup-closed-by-user') {
+          throw new Error('La ventana de Google se cerró antes de completar el inicio de sesión.');
+        }
+        if (err.code === 'auth/configuration-not-found' || err.code === 'auth/operation-not-allowed') {
+          return {
+            success: false,
+            needsProviderEnable: true,
+            error: 'Debes habilitar el proveedor "Google" en la consola de Firebase.',
+            consoleUrl: 'https://console.firebase.google.com/project/lumcards/authentication/providers'
+          };
+        }
+        if (err.code === 'auth/internal-error') {
+          throw new Error('El navegador bloqueó la conexión de cookies de terceros con Firebase. Desactiva bloqueadores o abre Lumcards en ventana normal.');
+        }
+        throw err;
+      }
     },
 
     // Sincronizar todos los mazos, tarjetas, estadísticas y configuraciones a Cloud Firestore

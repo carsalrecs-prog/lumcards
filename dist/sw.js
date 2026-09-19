@@ -1,10 +1,10 @@
-const CACHE_NAME = 'lumcards-cache-20260919-drive-oauth-r7';
+const CACHE_NAME = 'lumcards-cache-20260919-gis-auth-r8';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/app.css?v=20260918-studio-workspace-r2',
   '/student.css?v=20260918-studio-workspace-r2',
-  '/app.js?v=20260919-drive-oauth-r6',
+  '/app.js?v=20260919-gis-auth-r8',
   '/client-startup.js?v=20260919-drive-oauth-r7',
   '/card-runtime.js',
   '/vendor/katex/katex.min.js',
@@ -31,7 +31,7 @@ const ASSETS_TO_CACHE = [
   '/vendor/katex/fonts/KaTeX_Size4-Regular.woff2',
   '/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2',
 
-  '/sync-manager.js?v=20260919-drive-oauth-r6',
+  '/sync-manager.js?v=20260919-gis-auth-r8',
   '/manifest.json',
   '/icon.svg',
   '/icon-192.png',

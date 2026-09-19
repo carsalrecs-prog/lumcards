@@ -3,6 +3,11 @@ tags: [lumcards, registro]
 updated: 2026-09-19
 ---
 
+## 2026-09-19 — Antigravity: corrección auth/internal-error Firebase con Google Identity Services
+
+- Resuelto `auth/internal-error` en `lumcards.vercel.app`: los dominios y proveedor en consola eran correctos, pero los navegadores modernos bloqueaban cookies de terceros entre Vercel y `firebaseapp.com`.
+- `signInWithGoogle` implementa Google Identity Services (`initTokenClient`) directo con `signInWithCredential`. Cache y enlaces subidos a `r8`. Paridad dist/docs 100%, pruebas npm y check-brain PASS. [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]].
+
 ## 2026-09-19 — Antigravity: corrección listado Drive y descargas web de copias
 
 - `listCloudDecks` ahora consulta carpeta y copias en raíz de Drive; `uploadDeckPackage` migrado a `multipart/related`.
