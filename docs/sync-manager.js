@@ -198,45 +198,84 @@
     async uploadDeckPackage(filename, contentBlob, description = 'Respaldo de Lumcards') {
       // Si el usuario tiene un token real de Google OAuth
       if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
-      {
-        const folderId = await this.getOrCreateFolder();
-        const metadata = {
-          name: filename,
-          parents: [folderId],
-          description: description
-        };
+      const folderId = await this.getOrCreateFolder();
 
+      const metadata = {
+        name: filename,
+        description: description
+      };
+      if (folderId) metadata.parents = [folderId];
+
+      // Formato multipart/related oficial de Google Drive v3 REST API
+      const boundary = '-------LumcardsBoundary' + Date.now();
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelim = "\r\n--" + boundary + "--";
+
+      const metadataPart = delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: ' + (contentBlob.type || 'application/octet-stream') + '\r\n\r\n';
+
+      const fullBlob = new Blob([metadataPart, contentBlob, closeDelim], {
+        type: 'multipart/related; boundary=' + boundary
+      });
+
+      const res = await this.authorizedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime,parents', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'multipart/related; boundary=' + boundary
+        },
+        body: fullBlob
+      });
+
+      if (!res.ok) {
+        // Fallback compatible con FormData
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', contentBlob);
-
-        const res = await this.authorizedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime', {
+        const fbRes = await this.authorizedFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,createdTime,parents', {
           method: 'POST',
           headers: { Authorization: `Bearer ${this.token}` },
           body: form
         });
-
-        if (!res.ok) throw new Error('No se pudo subir el mazo a Google Drive.');
-        return await res.json();
+        if (!fbRes.ok) throw new Error('No se pudo subir el mazo a Google Drive.');
+        return await fbRes.json();
       }
-
+      return await res.json();
     },
 
-    // Listar mazos disponibles en la carpeta de Drive
+    // Listar mazos disponibles en Google Drive (en carpeta y en raíz)
     async listCloudDecks() {
       if (!this.isConnected()) throw new Error('Conecta Google Drive para continuar.');
-      {
-        const folderId = await this.getOrCreateFolder();
-        const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
-        const res = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,modifiedTime,mimeType)&orderBy=modifiedTime desc`, {
+      const folderId = await this.getOrCreateFolder();
+
+      // 1. Consultar archivos dentro de la carpeta oficial de Lumcards
+      const qFolder = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+      const res = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files?q=${qFolder}&fields=files(id,name,size,modifiedTime,mimeType,parents)&orderBy=modifiedTime desc`, {
+        headers: { Authorization: `Bearer ${this.token}` }
+      });
+      if (!res.ok) throw new Error('No se pudieron listar los mazos en Google Drive.');
+      const data = await res.json();
+      let files = data.files || [];
+
+      // 2. Si la carpeta está vacía, buscar copias de Lumcards en la raíz o accesibles por este cliente
+      if (files.length === 0) {
+        const qRoot = encodeURIComponent(`trashed = false and mimeType != 'application/vnd.google-apps.folder' and (name contains '.colpkg' or name contains 'lumcards' or name contains '.json')`);
+        const rootRes = await this.authorizedFetch(`https://www.googleapis.com/drive/v3/files?q=${qRoot}&fields=files(id,name,size,modifiedTime,mimeType,parents)&orderBy=modifiedTime desc`, {
           headers: { Authorization: `Bearer ${this.token}` }
         });
-        if (!res.ok) throw new Error('No se pudieron listar los mazos en Google Drive.');
-        const data = await res.json();
-        return data.files || [];
+        if (rootRes.ok) {
+          const rootData = await rootRes.json();
+          files = rootData.files || [];
+        }
       }
 
+      return files;
     },
+
+
 
     // Descargar un mazo de Google Drive
     async downloadCloudDeck(fileId) {

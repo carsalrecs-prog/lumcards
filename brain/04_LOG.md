@@ -3,6 +3,11 @@ tags: [lumcards, registro]
 updated: 2026-09-19
 ---
 
+## 2026-09-19 — Antigravity: corrección listado Drive y descargas web de copias
+
+- `listCloudDecks` ahora consulta carpeta y copias en raíz de Drive; `uploadDeckPackage` migrado a `multipart/related`.
+- Vista `backups` normaliza metadatos (`name`, `date`, `size`), genera descargas Blob en navegador (eliminando errores 404 `/api/export` y `/api/backups/...`) y permite importar `.json` en modo web. Paridad dist/docs 100% y suites PASS. [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]].
+
 ## 2026-09-19 — Antigravity: subida a GitHub de integración Drive OAuth y sincronización Firebase
 
 - Código local con cliente Google Drive OAuth real, sincronización Firestore adaptada a reglas nuevas y suite de accesos integrado. 169 checks Chromium PASS, sintaxis Python PASS, pruebas de sync y contratos PASS. Subido a GitHub `origin/main` commit `586fbb7`. [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]].

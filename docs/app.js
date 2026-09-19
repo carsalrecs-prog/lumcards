@@ -1282,12 +1282,32 @@ function webApi(path, body, method = (body ? 'POST' : 'GET')) {
       isWebMode: true
     };
   }
-  if (route === 'backups') return store.backups || [];
+  if (route === 'backups') {
+    return (store.backups || []).map(b => ({
+      ...b,
+      name: b.name || b.filename || 'copia_seguridad.json',
+      filename: b.filename || b.name || 'copia_seguridad.json',
+      date: b.date || (b.iso ? b.iso.slice(0, 10) : '') || 'Hoy',
+      size: b.size ?? b.sizeBytes ?? 0,
+      sizeBytes: b.sizeBytes ?? b.size ?? 0
+    }));
+  }
   if (route === 'backup') {
-    const b = { filename: `lumcards_web_${new Date().toISOString().slice(0, 10)}.json`, iso: new Date().toISOString(), sizeBytes: 15000 };
-    store.backups = [b, ...(store.backups || [])];
+    const now = new Date().toISOString().slice(0, 10);
+    const filename = `lumcards_web_${now}.json`;
+    const jsonStr = JSON.stringify(store);
+    const b = {
+      name: filename,
+      filename: filename,
+      date: now,
+      iso: new Date().toISOString(),
+      size: jsonStr.length,
+      sizeBytes: jsonStr.length,
+      data: JSON.parse(jsonStr)
+    };
+    store.backups = [b, ...(store.backups || []).filter(x => (x.name || x.filename) !== filename)];
     saveWebData(store);
-    return { success: true };
+    return { success: true, backup: b };
   }
   if (route === 'settings') {
     store.settings = { ...store.settings, ...(body || {}) };
@@ -2376,7 +2396,12 @@ function statistics(){
   </div>`;
 }
 function localDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
-function backupsView(){return `<div class="workspace-page">${workspaceLinks()}${heading('Copias que puedes conservar.','Copias de tu colección con tarjetas, archivos multimedia y progreso.',button('Crear copia ahora','backup','archive','btn-primary','data-mutate'))}<div class="two-col"><section class="panel"><h2>Copias guardadas en este equipo</h2><p>${isWebMode?'En la web, el registro de una copia no garantiza un archivo recuperable. La recuperación de copias web está pendiente de validación.':'El escritorio crea copias al iniciar y antes de importar. Descarga una copia para conservarla fuera del equipo.'}</p>${backupList.length?backupList.map(b=>`<div class="backup-row">${icon('archive')}<div><strong>${esc(b.name)}</strong><small>${esc(b.date||'')} · ${num(Math.ceil((b.size||0)/1024))} KB</small></div><a class="btn" href="/api/backups/${encodeURIComponent(b.name)}" download aria-label="Descargar ${esc(b.name)}">${icon('download')}</a></div>`).join(''):'<p class="info-box">Crea tu primera copia para llevarte tu biblioteca a otro lugar.</p>'}</section><section class="panel"><span class="stat-icon">${icon('shield')}</span><h2 class="mt">Una copia también puede viajar.</h2><p>Descarga tu colección como <strong>.colpkg</strong> y guárdala en un disco externo o llévatela a otro equipo.</p><a class="btn" href="/api/export" download>${icon('download')}Exportar colección</a><p class="small">Para añadir el contenido de una copia a tu biblioteca, impórtala. Las notas se combinan; no se reemplaza toda la colección.</p>${button('Importar una copia','import','upload','btn-quiet')}</section></div></div>`;}
+function backupsView(){return `<div class="workspace-page">${workspaceLinks()}${heading('Copias que puedes conservar.','Copias de tu colección con tarjetas, archivos multimedia y progreso.',button('Crear copia ahora','backup','archive','btn-primary','data-mutate'))}<div class="two-col"><section class="panel"><h2>Copias guardadas en este equipo</h2><p>${isWebMode?'En la web, las copias se conservan en este navegador. Descarga una copia en formato JSON para conservarla fuera del equipo.':'El escritorio crea copias al iniciar y antes de importar. Descarga una copia para conservarla fuera del equipo.'}</p>${backupList.length?backupList.map(b=>{
+  const bName = b.name || b.filename || 'copia_seguridad.json';
+  const bDate = b.date || (b.iso ? b.iso.slice(0, 10) : '') || 'Hoy';
+  const bSize = b.size ?? b.sizeBytes ?? 0;
+  return `<div class="backup-row">${icon('archive')}<div><strong>${esc(bName)}</strong><small>${esc(bDate)} · ${num(Math.ceil(bSize/1024))} KB</small></div>${isWebMode?`<button class="btn" type="button" data-action="download-web-backup" data-filename="${esc(bName)}" aria-label="Descargar ${esc(bName)}">${icon('download')}</button>`:`<a class="btn" href="/api/backups/${encodeURIComponent(bName)}" download aria-label="Descargar ${esc(bName)}">${icon('download')}</a>`}</div>`;
+}).join(''):'<p class="info-box">Crea tu primera copia para llevarte tu biblioteca a otro lugar.</p>'}</section><section class="panel"><span class="stat-icon">${icon('shield')}</span><h2 class="mt">Una copia también puede viajar.</h2><p>Descarga tu colección como <strong>${isWebMode?'.json':'.colpkg'}</strong> y guárdala en un disco externo o llévatela a otro equipo.</p>${isWebMode?button('Exportar colección','export-web-collection','download','btn-primary'):`<a class="btn btn-primary" href="/api/export" download>${icon('download')}Exportar colección</a>`}<p class="small">Para añadir el contenido de una copia a tu biblioteca, impórtala. Las notas se combinan; no se reemplaza toda la colección.</p>${button('Importar una copia','import','upload','btn-quiet')}</section></div></div>`;}
 function settingsView(){return `<div class="workspace-page">${workspaceLinks()}${heading('Hazlo a tu manera.','Pequeños ajustes para tu rutina de aprendizaje.')}<div class="two-col"><section class="panel"><h2>Tu experiencia</h2><form id="settings-form"><div class="settings-row"><div><strong>Meta diaria</strong><p>Número de repasos que quieres completar al día.</p></div><input id="daily-goal" aria-label="Meta diaria de repasos" type="number" min="1" max="1000" value="${data.settings.dailyGoal||20}" required></div><div class="settings-row"><div><strong>Apariencia</strong><p>Elige el ambiente que te ayude a concentrarte.</p></div>${button(theme==='dark'?'Oscuro':'Claro','theme',theme==='dark'?'moon':'sun')}</div><div class="settings-row"><div><strong>Diseño de Tarjetas</strong><p>Personaliza el estilo visual, tipografía y colores.</p></div>${button('Personalizar estilo','open-templates','edit')}</div><div class="form-footer"><button class="btn btn-primary" data-mutate>Guardar ajustes</button></div></form></section><section class="panel"><h2>Tu biblioteca es tuya.</h2><p>${isWebMode?'Esta versión usa almacenamiento del navegador. Borrar los datos del sitio o usar una sesión privada puede hacerte perder la biblioteca local.':'La aplicación de escritorio almacena tu biblioteca en el equipo. Conserva copias fuera del dispositivo antes de borrar o trasladar archivos.'}</p><p class="info-box">${isWebMode?'Almacenamiento: este navegador. Una cuenta conectada no confirma que tu biblioteca esté sincronizada.':`Carpeta de datos: <strong>${esc(data.storage?.dataDir||'data')}</strong><br>Consulta Copias y transferencias para conservar un archivo fuera del equipo.`}</p><p class="small">Importar, borrar y restaurar pueden afectar a tu biblioteca. Lee la confirmación de cada operación antes de continuar.</p>${button('Ayuda y atajos','help','help')}<div class="settings-row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:16px"><div><strong>Zona de riesgo</strong><p>Reinicia el progreso de TODA la colección. Todas las tarjetas vuelven a estado "nueva". Revisa la confirmación y las opciones de recuperación antes de continuar.</p></div>${button('Reiniciar toda la colección','reset-all-prompt','undo','btn-quiet text-danger')}</div></section></div></div>`;}
 
 let syncInfo = null, syncInfoError = '';
@@ -3244,7 +3269,56 @@ async function startExam(deckId, mode, limit, alterScheduler = false){
 function updateEditorKind(){const form=$('#card-form'),kind=$('#note-kind')?.value;if(!form||!kind)return;const labels=form.querySelectorAll('textarea');labels[1].required=kind!=='cloze';labels[0].previousElementSibling.textContent=kind==='cloze'?'Texto con espacios ocultos':'Pregunta · anverso';labels[1].previousElementSibling.textContent=kind==='cloze'?'Información adicional (opcional)':'Respuesta · reverso';$('#editor-tip').textContent=kind==='cloze'?'Escribe, por ejemplo: La capital de Perú es {{c1::Lima}}. Selecciona una palabra y pulsa «Ocultar texto» para marcarla.':kind==='reversed'?'Se crearán dos tarjetas: pregunta → respuesta y respuesta → pregunta. Puedes usar fórmulas entre \( … \).':'Puedes usar HTML básico y fórmulas entre \( … \). Tu borrador se guarda en este navegador.';}
 
 function importModal(){showModal('Tus mazos, como en casa.','Trae tu biblioteca de Anki y empieza a estudiar aquí.',`<a class="btn" href="/practice.html#import" style="margin-bottom:18px">Importar CSV, TSV, TXT o JSON</a><div class="drop-zone" id="drop-zone" role="button" tabindex="0" data-action="pick-file">${icon('upload')}<strong>Arrastra tu archivo aquí</strong><p>o haz clic para elegirlo<br>.apkg · .colpkg · .anki2 · hasta 500 MB</p></div><div class="info-box">Se importan tarjetas, plantillas y archivos multimedia incluidos. ${isWebMode?'La importación de paquetes requiere la aplicación de escritorio. Conserva una copia antes de trasladar tu biblioteca.':'Antes de importar, se crea una copia local. Las notas repetidas se combinan y pueden actualizar campos existentes; revisa el resultado antes de continuar estudiando.'}</div><p class="small muted">Los mazos con complementos o JavaScript propio pueden necesitar ajustes. Para traer imágenes y audio, usa .apkg o .colpkg.</p><div id="import-status" class="form-error" role="status"></div>`);const zone=$('#drop-zone');zone.addEventListener('dragover',e=>{e.preventDefault();zone.classList.add('dragging');});zone.addEventListener('dragleave',()=>zone.classList.remove('dragging'));zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragging');if(e.dataTransfer.files[0])uploadFile(e.dataTransfer.files[0]);});zone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('#import-file').click();}});}
-async function uploadFile(file){if(busy)return;if(!/\.(apkg|colpkg|anki2)$/i.test(file.name)){toast('Elige un archivo .apkg, .colpkg o .anki2.',true);return;}if(file.size>500*1024*1024){toast('El archivo supera el límite de 500 MB.',true);return;}loading(true);const status=$('#import-status');if(status){status.className='small muted';status.textContent='Importando '+file.name+'… Mantén la app abierta.';}try{const res=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Anki-Request':'1'},body:file});const result=await res.json();if(!res.ok)throw new Error(result.error||'No se pudo importar el archivo.');await refresh(false);modal.close();view='decks';search='';filter='all';render();toast(result.message||'Mazo importado. Tu biblioteca está lista.');}catch(e){if(status){status.className='form-error';status.textContent=e.message;}toast(e.message,true);}finally{loading(false);$('#import-file').value='';}}
+async function uploadFile(file){
+  if(busy)return;
+  if(!/\.(apkg|colpkg|anki2|json)$/i.test(file.name)){
+    toast('Elige un archivo .apkg, .colpkg, .anki2 o .json.',true);
+    return;
+  }
+  if(file.size>500*1024*1024){toast('El archivo supera el límite de 500 MB.',true);return;}
+  loading(true);
+  const status=$('#import-status');
+  if(status){status.className='small muted';status.textContent='Importando '+file.name+'… Mantén la app abierta.';}
+  try{
+    if (isWebMode) {
+      const text = await file.text();
+      let imported = null;
+      try { imported = JSON.parse(text); } catch(_) {}
+      if (imported && (Array.isArray(imported.decks) || Array.isArray(imported.cards))) {
+        const store = getWebData();
+        let newDecks = 0, newCards = 0;
+        if (Array.isArray(imported.decks)) {
+          imported.decks.forEach(d => {
+            if (!store.decks.some(x => String(x.id) === String(d.id))) {
+              store.decks.push(d);
+              newDecks++;
+            }
+          });
+        }
+        if (Array.isArray(imported.cards)) {
+          imported.cards.forEach(c => {
+            if (!store.cards.some(x => String(x.id) === String(c.id))) {
+              store.cards.push(c);
+              newCards++;
+            }
+          });
+        }
+        saveWebData(store);
+        await refresh(false);
+        modal.close();
+        view='decks';search='';filter='all';
+        render();
+        toast(`Importación completada: ${newCards} tarjetas y ${newDecks} mazos.`);
+        return;
+      }
+    }
+    const res=await fetch('/api/import?name='+encodeURIComponent(file.name),{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Anki-Request':'1'},body:file});
+    const result=await res.json();
+    if(!res.ok)throw new Error(result.error||'No se pudo importar el archivo.');
+    await refresh(false);modal.close();view='decks';search='';filter='all';render();toast(result.message||'Mazo importado. Tu biblioteca está lista.');
+  }catch(e){if(status){status.className='form-error';status.textContent=e.message;}toast(e.message,true);}
+  finally{loading(false);$('#import-file').value='';}
+}
 async function promptStudyBlock(deckId, forceNew = false) {
   loading(true);
   try {
@@ -3430,7 +3504,7 @@ async function rate(rating){
   }finally{loading(false);}
 }
 async function previewCard(id){const c=await api('cards/'+encodeURIComponent(id));if(!c)return;showModal('Una idea para recordar.',esc(data.decks.find(d=>String(d.id)===String(c.deckId))?.name||''),`<iframe class="card-frame" id="preview-frame" title="Contenido de la tarjeta" sandbox="" referrerpolicy="no-referrer" style="height:360px"></iframe><div class="form-footer">${button(c.starred?'Quitar favorito':'Guardar favorito','star','star','',`data-id="${id}"`)}${c.editable?button('Editar tarjeta','edit-card','edit','btn-primary',`data-id="${id}"`):''}</div>${!c.editable?'<p class="small muted">Plantilla importada: para editar su diseño, personalízala desde Ajustes o edita sus campos.</p>':''}`);mountCard($('#preview-frame'),c,true);}
-async function navigate(next){view=next;selectedDeck=null;activeFolder=null;search='';if(next==='backups')backupList=await api('backups');if(next==='cards'||next==='favorites')await loadCards();if(next==='stats')await loadDetailedStats();if(next==='sync')await loadSyncInfo();if(next==='sync'||next==='admin')await loadAccessInfo();if(next==='admin')await loadAdminUsers();render();}
+async function navigate(next){view=next;selectedDeck=null;activeFolder=null;search='';if(next==='backups'){const rawList=await api('backups');backupList=(Array.isArray(rawList)?rawList:[]).map(b=>({...b,name:b.name||b.filename||'copia_seguridad.json',date:b.date||(b.iso?b.iso.slice(0,10):'')||'Hoy',size:b.size??b.sizeBytes??0}));}if(next==='cards'||next==='favorites')await loadCards();if(next==='stats')await loadDetailedStats();if(next==='sync')await loadSyncInfo();if(next==='sync'||next==='admin')await loadAccessInfo();if(next==='admin')await loadAdminUsers();render();}
 function help(){showModal('A tu ritmo, con menos clics.','Todo lo esencial para empezar.',`<div class="info-box"><strong>1.</strong> Importa un mazo o crea uno.<br><strong>2.</strong> Pulsa «Estudiar» y piensa la respuesta.<br><strong>3.</strong> Muestra la respuesta y elige cuánto recordaste.<br><strong>4.</strong> Vuelve mañana. Lumcards organiza el siguiente repaso óptimo.</div><div class="settings-row"><strong>Buscar en la biblioteca</strong><kbd>Ctrl + K</kbd></div><div class="settings-row"><strong>Mostrar la respuesta / Bien</strong><kbd>Espacio</kbd></div><div class="settings-row"><strong>Calificar un repaso</strong><kbd>1 / 2 / 3 / 4</kbd></div><div class="settings-row"><strong>Repetir audio</strong><kbd>R</kbd></div><div class="settings-row"><strong>Pantalla completa</strong><kbd>F</kbd></div><p class="small muted">La app funciona sin conexión después de instalarse. Reproduce el audio de las tarjetas automáticamente.</p>`);}
 async function confirmDelete(type,id){const d=type==='deck'?data.decks.find(d=>String(d.id)===String(id)):null;const note=type==='card'?await api('cards/'+encodeURIComponent(id)):null;showModal(type==='deck'?'¿Eliminar este mazo?':'¿Eliminar esta tarjeta?',type==='deck'?`Se eliminarán «${esc(d?.name)}» y sus tarjetas. Se guardará una copia antes de continuar.`:`Se eliminará esta nota y sus ${note?.siblingCount||1} tarjetas. Se guardará una copia antes de continuar.`,`<div class="form-footer">${button('Cancelar','close-modal')}${button('Eliminar','confirm-delete','trash','btn-danger',`data-type="${type}" data-id="${id}" data-mutate`)}</div>`);}
 
@@ -4327,13 +4401,84 @@ document.addEventListener('click', async e => {
       if (busy) return;
       loading(true);
       await api('backup', {});
-      backupList = await api('backups');
+      const rawList = await api('backups');
+      backupList = (Array.isArray(rawList) ? rawList : []).map(b => ({
+        ...b,
+        name: b.name || b.filename || 'copia_seguridad.json',
+        date: b.date || (b.iso ? b.iso.slice(0, 10) : '') || 'Hoy',
+        size: b.size ?? b.sizeBytes ?? 0
+      }));
       render();
       toast('Copia de seguridad creada.');
       loading(false);
     }
+    else if (a === 'download-web-backup') {
+      const filename = el.dataset.filename || `lumcards_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      const store = getWebData();
+      const bObj = (store.backups || []).find(x => (x.name === filename || x.filename === filename));
+      const payload = bObj?.data || store;
+      const jsonStr = JSON.stringify(payload, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const dl = document.createElement('a');
+      dl.href = url;
+      dl.download = filename.endsWith('.json') ? filename : filename + '.json';
+      document.body.appendChild(dl);
+      dl.click();
+      dl.remove();
+      URL.revokeObjectURL(url);
+      toast('Copia descargada: ' + dl.download);
+    }
+    else if (a === 'export-web-collection') {
+      const store = getWebData();
+      const jsonStr = JSON.stringify(store, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const now = new Date().toISOString().slice(0, 10);
+      const filename = `lumcards_coleccion_${now}.json`;
+      const url = URL.createObjectURL(blob);
+      const dl = document.createElement('a');
+      dl.href = url;
+      dl.download = filename;
+      document.body.appendChild(dl);
+      dl.click();
+      dl.remove();
+      URL.revokeObjectURL(url);
+      toast('Colección exportada correctamente: ' + filename);
+    }
     else if (a === 'export-deck') {
-      location.href = '/api/export?deckId=' + encodeURIComponent(id);
+      if (isWebMode) {
+        const store = getWebData();
+        const targetDeck = store.decks.find(d => String(d.id) === String(id));
+        const deckName = targetDeck?.name || 'mazo';
+        const prefix = deckName + '::';
+        const childDeckIds = new Set(
+          store.decks
+            .filter(d => d.name === deckName || d.name.startsWith(prefix))
+            .map(d => String(d.id))
+        );
+        const deckCards = store.cards.filter(c => childDeckIds.has(String(c.deckId)));
+        const exportData = {
+          version: 1,
+          deck: targetDeck,
+          decks: store.decks.filter(d => childDeckIds.has(String(d.id))),
+          cards: deckCards,
+          exportedAt: new Date().toISOString()
+        };
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const cleanName = deckName.replace(/[^\w\s-]/gi, '_').slice(0, 40);
+        const filename = `lumcards_${cleanName}_${new Date().toISOString().slice(0, 10)}.json`;
+        const url = URL.createObjectURL(blob);
+        const dl = document.createElement('a');
+        dl.href = url;
+        dl.download = filename;
+        document.body.appendChild(dl);
+        dl.click();
+        dl.remove();
+        URL.revokeObjectURL(url);
+        toast('Mazo exportado: ' + filename);
+      } else {
+        location.href = '/api/export?deckId=' + encodeURIComponent(id);
+      }
     }
     else if (a === 'delete-deck' || a === 'delete-deck-prompt') await deleteDeckPrompt(id);
     else if (a === 'reset-deck-prompt') await resetDeckPrompt(id);

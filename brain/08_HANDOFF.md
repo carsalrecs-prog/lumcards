@@ -1,5 +1,4 @@
 ---
----
 tags: [lumcards, relevo]
 updated: 2026-09-19
 ---
@@ -8,15 +7,14 @@ updated: 2026-09-19
 
 ## Control
 - Estado: lista_para_relevo.
-- Agente: Antigravity; actualizado 2026-09-19T13:21:00-05:00.
-- Entorno: D:\CODEX, main, base 66227af; cambios integrados y sincronizados a GitHub.
-- Ficha vigente: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]]. Tarea anterior: [[tasks/2026-09-19-1207-codex-completar-drive-real]]. Nube anterior: [[tasks/2026-09-19-0502-codex-validar-nube]]. Web reparada: [[tasks/2026-09-18-2133-codex-reparar-persistencia-web]].
+- Agente: Antigravity; actualizado 2026-09-19T13:43:00-05:00.
+- Entorno: D:\CODEX, main, base d462d57; listado Drive y descargas web reparadas.
+- Ficha vigente: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]]. Tarea anterior: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]]. Tarea previa: [[tasks/2026-09-19-1207-codex-completar-drive-real]].
 - Ficha anterior: [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]] (hecha: formulas locales).
 - Ficha previa: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Historial visual: [[tasks/2026-09-18-1426-antigravity-redisenar-resto-aplicacion]].
 
 ## Hecho
 - Drive real completo: API habilitada; cliente OAuth público integrado sin secretos; orígenes y permisos mínimos guardados. Autorización, subida, listado, descarga e importación reales PASS con copia sintética de 4 KB; retirada por Richard y carpeta verificada vacía. Código/cache r7 local sin publicar.
-- Reglas anteriores permitian autoaprobacion al crear documento: reproducido. Borrador local corregido pasa cuatro casos del simulador real (autoaprobacion denegada, pendiente permitido, admin sin verificar denegado/verificado permitido). Reglas publicadas con permiso expreso: CLI exit 0; sin escribir documentos.
 - Reparacion funcional web separada autorizada al continuar: los 4 fallos conocidos ahora pasan. Error local no anuncia guardado ni programa subida; formato ilegible preservado; fechas locales y timestamps string normalizados solo al calcular. Error/reintento de estadisticas sin bucle y con foco recuperado.
 - KaTeX local del repositorio reemplaza CDN en ambos HTML; cache r4 incluye fuentes/scripts. 24 checks Chromium reales, preview offline y prueba cache PWA PASS, capturas inspeccionadas. Sin dependencias nuevas ni cambios CSP.
 - Studio aplicado a Mi espacio/cuenta/copias/ajustes, importadores/editor y estados/confirmaciones. Preview sin guardar/audio; nombres largos y retorno de foco corregidos. Biblioteca/Estudio/Juegos conservados, reflow puntual en estadísticas.
