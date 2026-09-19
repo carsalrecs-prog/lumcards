@@ -3,7 +3,9 @@ tags: [lumcards, registro]
 updated: 2026-09-19
 ---
 
-# Registro de trabajo
+## 2026-09-19 — Antigravity: subida a GitHub de integración Drive OAuth y sincronización Firebase
+
+- Código local con cliente Google Drive OAuth real, sincronización Firestore adaptada a reglas nuevas y suite de accesos integrado. 169 checks Chromium PASS, sintaxis Python PASS, pruebas de sync y contratos PASS. Subido a GitHub `origin/main` commit `586fbb7`. [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]].
 
 ## 2026-09-19 — Codex: OAuth y transferencia Drive real
 
