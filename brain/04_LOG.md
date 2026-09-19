@@ -3,6 +3,12 @@ tags: [lumcards, registro]
 updated: 2026-09-19
 ---
 
+## 2026-09-19 — Antigravity: registro de migracion a Render.com para backend Python 3
+
+- Decision arquitectonica del usuario registrada: migrar de Vercel a Render.com para ejecutar el backend completo de Python 3 (server.py, clean_engine.py) con base de datos SQLite y APIs del motor.
+- Adaptaciones previas confirmadas (PORT dinamico en server.py, host header RENDER, requirements.txt).
+- Actualizados 01_CURRENT.md, 02_NEXT.md, 03_DECISIONS.md, 08_HANDOFF.md y ficha [[tasks/2026-09-19-1435-antigravity-migracion-render-python]].
+
 ## 2026-09-19 — Antigravity: corrección auth/internal-error Firebase con Google Identity Services
 
 - Resuelto `auth/internal-error` en `lumcards.vercel.app`: los dominios y proveedor en consola eran correctos, pero los navegadores modernos bloqueaban cookies de terceros entre Vercel y `firebaseapp.com`.

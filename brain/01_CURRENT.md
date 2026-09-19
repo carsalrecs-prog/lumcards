@@ -34,7 +34,7 @@ updated: 2026-09-19
 
 - Marca de trabajo: **Lumcards**.
 - Escritorio Windows: `Lumcards.exe`, host WinForms con WebView2 y servidor Python local.
-- Web/PWA: frontend estático en `dist/`, configuración de Vercel y Firebase.
+- Web/PWA: frontend estatico en dist/ e interfaz PWA; en migracion activa desde Vercel hacia **Render.com** (lumcards.onrender.com) para ejecutar el backend completo en Python 3 (server.py, clean_engine.py) con API SQLite y soporte integral del motor.
 - Android: proyecto Capacitor en `android/`; existe `Lumcards-Offline.apk` en la raíz.
 - Biblioteca local: colección y medios bajo `data/`. Están dentro de la carpeta raíz del vault, pero se excluyen de la memoria documental y de la lectura inicial de agentes.
 

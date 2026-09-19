@@ -7,9 +7,9 @@ updated: 2026-09-19
 
 ## Control
 - Estado: lista_para_relevo.
-- Agente: Antigravity; actualizado 2026-09-19T14:30:00-05:00.
-- Entorno: D:\CODEX, main; resuelto auth/internal-error con Google Identity Services directo.
-- Ficha vigente: [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]]. Tarea anterior: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]]. Tarea previa: [[tasks/2026-09-19-1310-antigravity-fix-sync-drive-produccion]].
+- Agente: Antigravity; actualizado 2026-09-19T14:35:00-05:00.
+- Entorno: D:\CODEX, main; registradas directrices de migracion a Render.com para Python 3.
+- Ficha vigente: [[tasks/2026-09-19-1435-antigravity-migracion-render-python]]. Tarea anterior: [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]]. Tarea previa: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]].
 - Ficha anterior: [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]] (hecha: formulas locales).
 - Ficha previa: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Historial visual: [[tasks/2026-09-18-1426-antigravity-redisenar-resto-aplicacion]].
 

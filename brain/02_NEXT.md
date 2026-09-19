@@ -11,6 +11,7 @@ updated: 2026-09-19
 - [x] Publicar solo reglas corregidas tras autorizacion expresa: CLI exit 0 el 2026-09-19.
 - [x] Eliminar simulacion de Drive y preparar GIS con errores/permisos/caducidad; contratos sinteticos y PWA PASS. [[tasks/2026-09-19-1156-codex-drive-oauth]]
 - [x] Configurar Drive real: clientId público, orígenes, API, permisos y transferencia remota sintética completa. Archivo de prueba retirado. [[tasks/2026-09-19-1207-codex-completar-drive-real]]
+- [ ] Desplegar y validar servicio web en Render.com (lumcards.onrender.com) con Python 3 y servidor server.py.
 - [ ] Validar registro/aprobacion/transferencia con cuentas de prueba y resolver control de acceso pago a datos (todavia no impuesto por reglas).
 
 

@@ -7,6 +7,13 @@ updated: 2026-09-15
 
 ## Confirmadas
 
+### 2026-09-19 — Migracion de Vercel a Render.com para soporte del backend Python 3
+
+- Contexto: Vercel solo aloja el frontend estatico y no permite ejecutar el proceso continuo de Python 3 (server.py) con SQLite en disco ni el motor clean_engine.py.
+- Decision: Migrar la web de Lumcards a **Render.com** (Web Service en lumcards.onrender.com) ejecutando Python 3 con python server.py.
+- Adaptaciones realizadas: server.py soporta variable PORT dinamica y valida el host .onrender.com / encabezado RENDER. Se creo requirements.txt con dependencias necesarias.
+- Consecuencias: La version web en Render unifica las capacidades de API nativa (importacion .apkg, exportacion .colpkg, oclusion de imagenes y persistencia SQLite) que antes estaban limitadas en Vercel.
+
 ### 2026-09-15 — Inventario de capacidades sin permisos implícitos
 
 - Las capacidades observadas de Codex y Antigravity se registran en [[10_AGENT_CAPABILITIES]] para planificar relevos compatibles con cada herramienta.
