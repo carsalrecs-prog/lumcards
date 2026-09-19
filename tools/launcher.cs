@@ -153,7 +153,15 @@ namespace LumcardsDesktop
                 {
                     eventsBound = true;
                     web.CoreWebView2.NavigationStarting += (sender, e) => { if (!IsLocal(e.Uri)) { e.Cancel = true; if (e.IsUserInitiated) OpenExternal(e.Uri); } };
-                    web.CoreWebView2.NewWindowRequested += (sender, e) => { e.Handled = true; if (e.IsUserInitiated) { if (IsLocal(e.Uri)) web.CoreWebView2.Navigate(e.Uri); else OpenExternal(e.Uri); } };
+                    web.CoreWebView2.NewWindowRequested += (sender, e) =>
+                    {
+                        if (e.Uri != null && (e.Uri.StartsWith("https://accounts.google.com") || e.Uri.StartsWith("https://lumcards.firebaseapp.com")))
+                        {
+                            return;
+                        }
+                        e.Handled = true;
+                        if (e.IsUserInitiated) { if (IsLocal(e.Uri)) web.CoreWebView2.Navigate(e.Uri); else OpenExternal(e.Uri); }
+                    };
                     web.CoreWebView2.DownloadStarting += OnDownload;
                     web.CoreWebView2.NavigationCompleted += async (sender, e) =>
                     {

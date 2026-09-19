@@ -7,9 +7,9 @@ updated: 2026-09-19
 
 ## Control
 - Estado: lista_para_relevo.
-- Agente: Antigravity; actualizado 2026-09-19T14:35:00-05:00.
-- Entorno: D:\CODEX, main; registradas directrices de migracion a Render.com para Python 3.
-- Ficha vigente: [[tasks/2026-09-19-1435-antigravity-migracion-render-python]]. Tarea anterior: [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]]. Tarea previa: [[tasks/2026-09-19-1332-antigravity-copias-drive-descargas]].
+- Agente: Antigravity; actualizado 2026-09-19T14:50:00-05:00.
+- Entorno: D:\CODEX, main; soporte OAuth WebView2 en escritorio y migracion Render.
+- Ficha vigente: [[tasks/2026-09-19-1445-antigravity-pc-desktop-oauth-fix]]. Tarea anterior: [[tasks/2026-09-19-1435-antigravity-migracion-render-python]]. Tarea previa: [[tasks/2026-09-19-1430-antigravity-firebase-auth-gis-fallback]].
 - Ficha anterior: [[tasks/2026-09-18-2113-antigravity-cierre-matematicas-studio]] (hecha: formulas locales).
 - Ficha previa: [[tasks/2026-09-18-2050-antigravity-redisenar-resto-aplicacion]]. Historial visual: [[tasks/2026-09-18-1426-antigravity-redisenar-resto-aplicacion]].
 

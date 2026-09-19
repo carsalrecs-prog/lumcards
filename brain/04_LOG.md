@@ -3,6 +3,12 @@ tags: [lumcards, registro]
 updated: 2026-09-19
 ---
 
+## 2026-09-19 — Antigravity: habilitacion de ventanas de autenticacion OAuth en aplicativo PC
+
+- launcher.cs: NewWindowRequested permite ventanas hijas de accounts.google.com y lumcards.firebaseapp.com en WebView2 sin forzarlas al navegador externo.
+- server.py: CSP ampliado con lumcards.firebaseapp.com en frame-src y connect-src.
+- tools/desktop-build/Lumcards.exe recompilado con exito. [[tasks/2026-09-19-1445-antigravity-pc-desktop-oauth-fix]].
+
 ## 2026-09-19 — Antigravity: registro de migracion a Render.com para backend Python 3
 
 - Decision arquitectonica del usuario registrada: migrar de Vercel a Render.com para ejecutar el backend completo de Python 3 (server.py, clean_engine.py) con base de datos SQLite y APIs del motor.

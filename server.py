@@ -64,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         if media:
             self.send_header('Access-Control-Allow-Origin', '*')
         else:
-            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com; media-src 'self' data:; font-src 'self' data:; frame-src 'self' https://accounts.google.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self' https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.googleusercontent.com; media-src 'self' data:; font-src 'self' data:; frame-src 'self' https://accounts.google.com https://lumcards.firebaseapp.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://lumcards.firebaseapp.com https://*.firebaseio.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
         if attachment:
             self.send_header('Content-Disposition', f'attachment; filename="{attachment}"')
         self.end_headers()
